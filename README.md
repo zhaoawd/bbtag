@@ -2,6 +2,8 @@
 
 BT370R 蓝签电子墨水标签 BLE 图像推送库。
 
+可以淘宝搜索`蓝签`
+
 支持两类屏幕:
 
 - `3.7inch` (`240×416`, 4 色, 设备名前缀 `EPD-`)
@@ -124,26 +126,6 @@ async def push_text():
     await push(packets, device_address=target["address"])
 
 asyncio.run(push_image())
-```
-
-## 项目结构
-
-```
-bbtag/
-├── bluetag/              # Python 核心库
-│   ├── image.py          #   图像量化、2bpp 编解码
-│   ├── text.py           #   文字渲染、自动排版
-│   ├── protocol.py       #   协议帧组装、LZO 压缩、分包
-│   ├── ble.py            #   BLE 扫描/连接/发送 (bleak)
-│   ├── screens.py        #   屏幕配置、设备名前缀、缓存文件规则
-│   ├── transfer.py       #   2.13 寸图层发送协议
-│   ├── server.py         #   REST API 服务 (FastAPI)
-│   └── cli.py            #   命令行工具
-├── docs/                 # 协议逆向分析参考
-├── examples/             # 示例脚本
-│   ├── push_image.py     #   推送图片示例
-│   └── push_text.py      #   推送文字示例
-└── pyproject.toml
 ```
 
 ## License
