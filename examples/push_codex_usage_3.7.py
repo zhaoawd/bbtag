@@ -37,6 +37,7 @@ from bluetag.ble import BleDependencyError
 from bluetag import quantize, pack_2bpp, build_frame, packetize
 from bluetag.protocol import parse_mac_suffix
 from bluetag.screens import get_screen_profile
+from bluetag import usage_codex
 
 DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
 USAGE_PATH = "/wham/usage"
@@ -716,11 +717,13 @@ def load_usage_payload(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
             raise CodexUsageError(f"Invalid input JSON: {exc}") from exc
         return payload, f"file:{args.input_json}"
 
-    auth_path = get_auth_path(args.auth_path)
-    config_path = get_config_path(args.config_path)
-    credentials = load_credentials(auth_path)
-    base_url = resolve_base_url(config_path, args.base_url)
-    payload = fetch_usage_json(base_url, credentials, args.timeout)
+    base_url = usage_codex.resolve_base_url(args.config_path, args.base_url)
+    payload = usage_codex.fetch_codex_usage(
+        timeout=args.timeout,
+        auth_path=args.auth_path,
+        config_path=args.config_path,
+        base_url=args.base_url,
+    )
     return payload, f"{base_url}{USAGE_PATH}"
 
 
@@ -733,14 +736,9 @@ def main() -> int:
 
     try:
         payload, source = load_usage_payload(args)
-        tzinfo = resolve_timezone(args.timezone)
-        rows = build_rows(payload, tzinfo)
-        image = render_usage_image(
-            rows,
-            width=WIDTH,
-            height=HEIGHT,
-            font_path=args.font,
-        )
+        tzinfo = usage_codex.resolve_timezone(args.timezone)
+        rows = usage_codex.build_codex_rows(payload, tzinfo)
+        image = usage_codex.render_codex_3_7(payload, tzinfo, font_path=args.font)
         output_path = save_preview(image, Path(args.output))
         print(f"预览已保存: {output_path}")
         print(f"Usage 来源: {source}")
@@ -757,7 +755,7 @@ def main() -> int:
             print(f"❌ {exc}", file=sys.stderr)
             return 2
         return 0 if ok else 1
-    except CodexUsageError as exc:
+    except (CodexUsageError, usage_codex.CodexUsageError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

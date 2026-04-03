@@ -7,8 +7,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from datetime import date
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image
 
@@ -25,11 +28,21 @@ from bluetag.protocol import build_frame, packetize, parse_mac_suffix
 from bluetag.screens import ScreenProfile, get_screen_profile
 from bluetag.text import render_text
 from bluetag.transfer import send_bicolor_image
+from bluetag.usage_claude import fetch_claude_usage, render_claude_2_13, render_claude_3_7
+from bluetag.usage_codex import fetch_codex_usage, render_codex_2_13, render_codex_3_7
 
 DEFAULT_SCAN_TIMEOUT = 5.0
 DEFAULT_SCAN_RETRIES = 3
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_SCREEN = "3.7inch"
+
+
+@dataclass(frozen=True)
+class UsageLoopSource:
+    name: str
+    timeout: float
+    fetch: Callable[..., dict]
+    render: Callable[..., Image.Image]
 
 
 def _default_text_title() -> str:
@@ -102,7 +115,10 @@ def _build_frame_preview_and_payload(
     img: Image.Image,
     profile: ScreenProfile,
 ) -> tuple[Image.Image, bytes]:
-    indices = quantize(img, flip=profile.mirror, size=profile.size)
+    prepared = img.convert("RGB")
+    if profile.name == "3.7inch" and prepared.size == (416, 240):
+        prepared = prepared.transpose(Image.Transpose.ROTATE_90)
+    indices = quantize(prepared, flip=profile.mirror, size=profile.size)
     preview = indices_to_image(indices, size=profile.size)
     data_2bpp = pack_2bpp(indices)
     return preview, data_2bpp
@@ -185,6 +201,94 @@ async def _push_layer_image(
         )
     finally:
         await session.close()
+
+
+async def _push_rendered_image(
+    profile: ScreenProfile,
+    target: dict,
+    image: Image.Image,
+) -> bool:
+    interval_ms = profile.default_interval_ms
+    if profile.transport == "frame":
+        _preview, data_2bpp = _build_frame_preview_and_payload(image, profile)
+        return await _push_frame_image(profile, target, data_2bpp, interval_ms)
+
+    _preview, black_data, red_data = _build_layer_preview_and_payload(image, profile)
+    return await _push_layer_image(profile, target, black_data, red_data, interval_ms)
+
+
+def _resolve_timezone(name: str | None):
+    if not name:
+        return datetime.now().astimezone().tzinfo or timezone.utc
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError as exc:
+        print(f"❌ Unknown timezone: {name}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
+    if screen == "2.13inch":
+        return [
+            UsageLoopSource(
+                name="codex",
+                timeout=30.0,
+                fetch=fetch_codex_usage,
+                render=render_codex_2_13,
+            ),
+            UsageLoopSource(
+                name="claude",
+                timeout=10.0,
+                fetch=fetch_claude_usage,
+                render=render_claude_2_13,
+            ),
+        ]
+
+    return [
+        UsageLoopSource(
+            name="codex",
+            timeout=30.0,
+            fetch=fetch_codex_usage,
+            render=render_codex_3_7,
+        ),
+        UsageLoopSource(
+            name="claude",
+            timeout=10.0,
+            fetch=fetch_claude_usage,
+            render=render_claude_3_7,
+        ),
+    ]
+
+
+async def _run_loop_cycle(
+    *,
+    sources: Sequence[UsageLoopSource],
+    tzinfo,
+    font_path: str | None,
+    push_image: Callable[[Image.Image], Awaitable[bool]],
+    interval_seconds: float,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    for source in sources:
+        try:
+            payload = source.fetch(timeout=source.timeout)
+            image = source.render(payload, tzinfo, font_path=font_path)
+        except Exception as exc:
+            print(f"❌ {source.name} usage failed: {exc}", file=sys.stderr)
+            await sleep(interval_seconds)
+            continue
+
+        try:
+            ok = await push_image(image)
+        except Exception as exc:
+            print(f"❌ {source.name} push failed: {exc}", file=sys.stderr)
+            ok = False
+
+        if ok:
+            print(f"✅ {source.name} usage pushed")
+        else:
+            print(f"❌ {source.name} push failed", file=sys.stderr)
+        await sleep(interval_seconds)
 
 
 def cmd_scan(args):
@@ -306,6 +410,40 @@ def cmd_text(args):
         return ok
 
     asyncio.run(_push())
+
+
+def cmd_loop(args):
+    profile = _resolve_profile(args.screen)
+    tzinfo = _resolve_timezone(args.timezone)
+    sources = _build_loop_sources(profile.name)
+
+    async def _loop():
+        target = await _find_target(args, profile)
+        if not target:
+            print("❌ 未找到设备")
+            return
+
+        print(
+            f"开始循环刷新 {profile.name} 设备 {target['name']} ({target['address']}), "
+            f"间隔 {args.interval}s"
+        )
+
+        async def _push(image: Image.Image) -> bool:
+            return await _push_rendered_image(profile, target, image)
+
+        while True:
+            await _run_loop_cycle(
+                sources=sources,
+                tzinfo=tzinfo,
+                font_path=args.font,
+                push_image=_push,
+                interval_seconds=float(args.interval),
+            )
+
+    try:
+        asyncio.run(_loop())
+    except KeyboardInterrupt:
+        print("\n已停止循环刷新")
 
 
 def cmd_decode(args):
@@ -446,6 +584,23 @@ def main():
         "--interval", "-i", type=int, help="包间隔 (ms，默认按屏幕选择)"
     )
 
+    loop_p = sub.add_parser("loop", help="交替推送 Codex / Claude Code usage")
+    loop_p.add_argument("--device", "-d", help="设备名")
+    loop_p.add_argument("--address", "-a", help="设备 BLE 地址")
+    loop_p.add_argument(
+        "--screen",
+        required=True,
+        help="屏幕尺寸: 3.7inch/3.7 或 2.13inch/2.13",
+    )
+    loop_p.add_argument(
+        "--interval",
+        type=int,
+        default=90,
+        help="刷新间隔 (秒，默认 90)",
+    )
+    loop_p.add_argument("--timezone", help="时区，例如 Asia/Shanghai")
+    loop_p.add_argument("--font", help="自定义字体路径")
+
     decode_p = sub.add_parser("decode", help="从抓包文件解码图片 (调试)")
     decode_p.add_argument("log", help="btsnoop HCI 日志文件")
     decode_p.add_argument("--output", "-o", help="输出图片路径")
@@ -467,6 +622,12 @@ def main():
     elif args.command == "text":
         try:
             cmd_text(args)
+        except BleDependencyError as exc:
+            print(f"❌ {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+    elif args.command == "loop":
+        try:
+            cmd_loop(args)
         except BleDependencyError as exc:
             print(f"❌ {exc}", file=sys.stderr)
             raise SystemExit(2) from exc

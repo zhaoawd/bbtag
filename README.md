@@ -58,6 +58,12 @@ uv run examples/push_codex_usage.py
 # 仅生成 Codex usage 预览图
 uv run examples/push_codex_usage.py --preview-only
 
+# 交替刷新 Codex / Claude Code usage 到 2.13 寸
+uv run bluetag loop --screen 2.13inch
+
+# 指定时区和刷新间隔
+uv run bluetag loop --screen 3.7inch --interval 120 --timezone Asia/Shanghai
+
 # 把 Kimi Code usage 画成 /stats 风格并推到 2.13 寸
 uv run examples/push_kimi_usage.py
 
@@ -98,6 +104,19 @@ uv run bluetag push photo.png -i 80
 | `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` |
 
 文字排版会根据 `--screen` 自动切换画布尺寸和字号策略。标题尽量大 (最多 2 行)，正文自动缩小直到全部放得下。
+
+### loop 子命令参数
+
+| 参数 | 说明 |
+|------|------|
+| `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` |
+| `--interval` | 刷新间隔秒数，默认 `90` |
+| `--device, -d` | 设备名 |
+| `--address, -a` | 设备 BLE 地址 |
+| `--timezone` | 时区，例如 `Asia/Shanghai` |
+| `--font` | 自定义字体路径 |
+
+`loop` 会先定位目标设备，然后在 Codex usage 和 Claude Code usage 两张面板之间交替刷新。单次抓取或单次推送失败只会跳过本轮，不会中断整个循环；`Ctrl+C` 可优雅退出。
 
 ## Python API
 
@@ -147,6 +166,8 @@ bbtag/
 │   ├── screens.py        #   屏幕配置、设备名前缀、缓存文件规则
 │   ├── transfer.py       #   2.13 寸图层发送协议
 │   ├── server.py         #   REST API 服务 (FastAPI)
+│   ├── usage_codex.py    #   Codex usage 获取与渲染
+│   ├── usage_claude.py   #   Claude Code usage 获取与渲染
 │   └── cli.py            #   命令行工具
 ├── examples/                     # 示例脚本
 │   ├── push_image.py             #   推送图片示例
