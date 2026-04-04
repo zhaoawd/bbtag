@@ -28,13 +28,25 @@ from bluetag.protocol import build_frame, packetize, parse_mac_suffix
 from bluetag.screens import ScreenProfile, get_screen_profile
 from bluetag.text import render_text
 from bluetag.transfer import send_bicolor_image
-from bluetag.usage_claude import fetch_claude_usage, render_claude_2_13, render_claude_3_7
-from bluetag.usage_codex import fetch_codex_usage, render_codex_2_13, render_codex_3_7
+from bluetag.usage_claude import (
+    build_claude_refresh_rows,
+    fetch_claude_usage,
+    render_claude_2_13,
+    render_claude_3_7,
+)
+from bluetag.usage_codex import (
+    build_codex_refresh_rows,
+    fetch_codex_usage,
+    render_codex_2_13,
+    render_codex_3_7,
+)
 
 DEFAULT_SCAN_TIMEOUT = 5.0
 DEFAULT_SCAN_RETRIES = 3
 DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_SCREEN = "3.7inch"
+REFRESH_PERCENT_THRESHOLD = 2
+REFRESH_BAR_PX_THRESHOLD = 3
 
 
 @dataclass(frozen=True)
@@ -42,7 +54,23 @@ class UsageLoopSource:
     name: str
     timeout: float
     fetch: Callable[..., dict]
+    refresh_rows: Callable[..., list[tuple[str, float]]]
+    bar_inner_width: int
     render: Callable[..., Image.Image]
+
+
+@dataclass(frozen=True)
+class UsageRefreshRow:
+    label: str
+    left_percent_int: int
+    bar_fill_px: int
+
+
+@dataclass(frozen=True)
+class UsageRefreshState:
+    source: str
+    screen: str
+    rows: tuple[UsageRefreshRow, ...]
 
 
 def _default_text_title() -> str:
@@ -234,12 +262,18 @@ def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
                 name="codex",
                 timeout=30.0,
                 fetch=fetch_codex_usage,
+                refresh_rows=build_codex_refresh_rows,
+                bar_inner_width=232,
                 render=render_codex_2_13,
             ),
             UsageLoopSource(
                 name="claude",
                 timeout=10.0,
                 fetch=fetch_claude_usage,
+                refresh_rows=lambda payload: build_claude_refresh_rows(
+                    payload, include_sonnet=False
+                ),
+                bar_inner_width=232,
                 render=render_claude_2_13,
             ),
         ]
@@ -249,46 +283,120 @@ def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
             name="codex",
             timeout=30.0,
             fetch=fetch_codex_usage,
+            refresh_rows=build_codex_refresh_rows,
+            bar_inner_width=370,
             render=render_codex_3_7,
         ),
         UsageLoopSource(
             name="claude",
             timeout=10.0,
             fetch=fetch_claude_usage,
+            refresh_rows=lambda payload: build_claude_refresh_rows(
+                payload, include_sonnet=True
+            ),
+            bar_inner_width=368,
             render=render_claude_3_7,
         ),
     ]
 
 
+def _build_refresh_state(
+    *,
+    source_name: str,
+    screen_name: str,
+    rows: Sequence[tuple[str, float]],
+    bar_inner_width: int,
+) -> UsageRefreshState:
+    refresh_rows = tuple(
+        UsageRefreshRow(
+            label=label,
+            left_percent_int=int(round(left_percent)),
+            bar_fill_px=round(
+                bar_inner_width * max(0.0, min(100.0, left_percent)) / 100.0
+            ),
+        )
+        for label, left_percent in rows
+    )
+    return UsageRefreshState(
+        source=source_name,
+        screen=screen_name,
+        rows=refresh_rows,
+    )
+
+
+def _refresh_reason(
+    previous: UsageRefreshState | None,
+    current: UsageRefreshState,
+) -> str | None:
+    if previous is None:
+        return "first frame"
+    if len(previous.rows) != len(current.rows):
+        return "row count changed"
+
+    for old_row, new_row in zip(previous.rows, current.rows):
+        if old_row.label != new_row.label:
+            return "labels changed"
+        if (
+            abs(old_row.left_percent_int - new_row.left_percent_int)
+            >= REFRESH_PERCENT_THRESHOLD
+        ):
+            return "percent changed"
+        if (
+            abs(old_row.bar_fill_px - new_row.bar_fill_px)
+            >= REFRESH_BAR_PX_THRESHOLD
+        ):
+            return "bar width changed"
+    return None
+
+
 async def _run_loop_cycle(
     *,
     sources: Sequence[UsageLoopSource],
+    screen_name: str,
     tzinfo,
     font_path: str | None,
     push_image: Callable[[Image.Image], Awaitable[bool]],
     interval_seconds: float,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-) -> None:
+    refresh_states: dict[str, UsageRefreshState] | None = None,
+) -> dict[str, UsageRefreshState]:
+    states = {} if refresh_states is None else dict(refresh_states)
+
     for source in sources:
         try:
             payload = source.fetch(timeout=source.timeout)
-            image = source.render(payload, tzinfo, font_path=font_path)
+            current_state = _build_refresh_state(
+                source_name=source.name,
+                screen_name=screen_name,
+                rows=source.refresh_rows(payload),
+                bar_inner_width=source.bar_inner_width,
+            )
         except Exception as exc:
             print(f"❌ {source.name} usage failed: {exc}", file=sys.stderr)
             await sleep(interval_seconds)
             continue
 
+        reason = _refresh_reason(states.get(source.name), current_state)
+        if reason is None:
+            print(f"skip {source.name} refresh: no meaningful value change")
+            await sleep(interval_seconds)
+            continue
+
         try:
+            image = source.render(payload, tzinfo, font_path=font_path)
             ok = await push_image(image)
         except Exception as exc:
             print(f"❌ {source.name} push failed: {exc}", file=sys.stderr)
             ok = False
 
         if ok:
-            print(f"✅ {source.name} usage pushed")
+            states[source.name] = current_state
+            print(f"push {source.name} refresh: {reason}")
         else:
             print(f"❌ {source.name} push failed", file=sys.stderr)
         await sleep(interval_seconds)
+
+    return states
 
 
 def cmd_scan(args):
@@ -431,13 +539,16 @@ def cmd_loop(args):
         async def _push(image: Image.Image) -> bool:
             return await _push_rendered_image(profile, target, image)
 
+        refresh_states: dict[str, UsageRefreshState] = {}
         while True:
-            await _run_loop_cycle(
+            refresh_states = await _run_loop_cycle(
                 sources=sources,
+                screen_name=profile.name,
                 tzinfo=tzinfo,
                 font_path=args.font,
                 push_image=_push,
                 interval_seconds=float(args.interval),
+                refresh_states=refresh_states,
             )
 
     try:

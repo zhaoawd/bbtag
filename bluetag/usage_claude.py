@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import urllib.error
 import urllib.request
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +18,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 API_URL = "https://api.anthropic.com/api/oauth/usage"
 API_BETA = "oauth-2025-04-20"
+TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 WIDTH_2_13 = 250
 HEIGHT_2_13 = 122
 WIDTH_3_7 = 416
@@ -45,6 +49,14 @@ class UsageRow:
     resets_text: str
 
 
+@dataclass(frozen=True)
+class ClaudeOAuthCredentials:
+    access_token: str
+    refresh_token: str | None
+    expires_at_ms: int | None
+    raw_payload: dict[str, Any]
+
+
 def resolve_timezone(name: str | None):
     if not name:
         return datetime.now().astimezone().tzinfo or timezone.utc
@@ -54,7 +66,7 @@ def resolve_timezone(name: str | None):
         raise ClaudeUsageError(f"Unknown timezone: {name}") from exc
 
 
-def _load_access_token_from_keychain() -> str:
+def _load_credentials_from_keychain() -> ClaudeOAuthCredentials:
     try:
         result = subprocess.run(
             ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
@@ -90,40 +102,189 @@ def _load_access_token_from_keychain() -> str:
     access_token = claude_oauth.get("accessToken")
     if not isinstance(access_token, str) or not access_token.strip():
         raise ClaudeUsageError("Missing `claudeAiOauth.accessToken` in Claude credentials.")
-    return access_token.strip()
+    refresh_token = claude_oauth.get("refreshToken")
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        refresh_token = None
+    else:
+        refresh_token = refresh_token.strip()
 
+    expires_at_ms = claude_oauth.get("expiresAt")
+    if not isinstance(expires_at_ms, int):
+        expires_at_ms = None
 
-def fetch_claude_usage(*, timeout: float = 10.0) -> dict[str, Any]:
-    access_token = _load_access_token_from_keychain()
-    request = urllib.request.Request(
-        API_URL,
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "anthropic-beta": API_BETA,
-            "Accept": "application/json",
-            "User-Agent": "bluetag-usage-claude",
-        },
-        method="GET",
+    return ClaudeOAuthCredentials(
+        access_token=access_token.strip(),
+        refresh_token=refresh_token,
+        expires_at_ms=expires_at_ms,
+        raw_payload=payload,
     )
 
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        details = exc.read().decode("utf-8", errors="replace").strip()
-        suffix = f": {details}" if details else ""
-        raise ClaudeUsageError(f"Claude API returned HTTP {exc.code}{suffix}") from exc
-    except urllib.error.URLError as exc:
-        raise ClaudeUsageError(f"Request failed: {exc.reason}") from exc
 
+def _save_credentials_to_keychain(credentials: ClaudeOAuthCredentials) -> None:
+    raw = json.dumps(credentials.raw_payload, separators=(",", ":"))
+    account = os.environ.get("USER", "claude-code")
+    result = subprocess.run(
+        [
+            "security",
+            "add-generic-password",
+            "-U",
+            "-a",
+            account,
+            "-s",
+            "Claude Code-credentials",
+            "-w",
+            raw,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        suffix = f": {stderr}" if stderr else ""
+        raise ClaudeUsageError(
+            "Refreshed Claude token but failed to save updated credentials" + suffix
+        )
+
+
+def _request_json(request: urllib.request.Request, timeout: float) -> dict[str, Any]:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read().decode("utf-8")
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as exc:
         raise ClaudeUsageError(f"Failed to parse API response as JSON: {exc}") from exc
-
     if not isinstance(payload, dict):
         raise ClaudeUsageError("Expected a JSON object from Claude usage API.")
     return payload
+
+
+def _is_token_expired_error(exc: urllib.error.HTTPError) -> bool:
+    if exc.code != 401:
+        return False
+    try:
+        details = exc.read().decode("utf-8", errors="replace").strip()
+        if not details:
+            return False
+        payload = json.loads(details)
+    except (OSError, json.JSONDecodeError):
+        return False
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return False
+    error_details = error.get("details")
+    if not isinstance(error_details, dict):
+        return False
+    return error_details.get("error_code") == "token_expired"
+
+
+def _refresh_access_token(
+    credentials: ClaudeOAuthCredentials,
+    *,
+    timeout: float,
+) -> ClaudeOAuthCredentials:
+    if not credentials.refresh_token:
+        raise ClaudeUsageError("Claude access token expired and no refresh token is available.")
+
+    payload = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": credentials.refresh_token,
+            "client_id": CLIENT_ID,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        TOKEN_URL,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "bluetag-usage-claude",
+        },
+        data=payload,
+        method="POST",
+    )
+    try:
+        token_payload = _request_json(request, timeout)
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace").strip()
+        suffix = f": {details}" if details else ""
+        raise ClaudeUsageError(
+            f"Claude OAuth refresh failed with HTTP {exc.code}{suffix}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise ClaudeUsageError(f"Claude OAuth refresh request failed: {exc.reason}") from exc
+
+    access_token = token_payload.get("access_token")
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise ClaudeUsageError("Claude OAuth refresh response did not include access_token.")
+
+    refresh_token = token_payload.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        refresh_token = credentials.refresh_token
+    else:
+        refresh_token = refresh_token.strip()
+
+    expires_in = token_payload.get("expires_in")
+    expires_at_ms = credentials.expires_at_ms
+    if isinstance(expires_in, (int, float)):
+        expires_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000 + expires_in * 1000)
+
+    updated_payload = json.loads(json.dumps(credentials.raw_payload))
+    claude_oauth = updated_payload.setdefault("claudeAiOauth", {})
+    if not isinstance(claude_oauth, dict):
+        raise ClaudeUsageError("Claude credentials JSON has invalid `claudeAiOauth` structure.")
+    claude_oauth["accessToken"] = access_token.strip()
+    if refresh_token:
+        claude_oauth["refreshToken"] = refresh_token
+    if expires_at_ms is not None:
+        claude_oauth["expiresAt"] = expires_at_ms
+
+    refreshed = ClaudeOAuthCredentials(
+        access_token=access_token.strip(),
+        refresh_token=refresh_token,
+        expires_at_ms=expires_at_ms,
+        raw_payload=updated_payload,
+    )
+    _save_credentials_to_keychain(refreshed)
+    return refreshed
+
+
+def fetch_claude_usage(*, timeout: float = 10.0) -> dict[str, Any]:
+    credentials = _load_credentials_from_keychain()
+
+    def build_usage_request(access_token: str) -> urllib.request.Request:
+        return urllib.request.Request(
+            API_URL,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "anthropic-beta": API_BETA,
+                "Accept": "application/json",
+                "User-Agent": "bluetag-usage-claude",
+            },
+            method="GET",
+        )
+
+    try:
+        return _request_json(build_usage_request(credentials.access_token), timeout)
+    except urllib.error.HTTPError as exc:
+        if not _is_token_expired_error(exc):
+            details = exc.read().decode("utf-8", errors="replace").strip()
+            suffix = f": {details}" if details else ""
+            raise ClaudeUsageError(f"Claude API returned HTTP {exc.code}{suffix}") from exc
+    except urllib.error.URLError as exc:
+        raise ClaudeUsageError(f"Request failed: {exc.reason}") from exc
+
+    refreshed = _refresh_access_token(credentials, timeout=timeout)
+    try:
+        return _request_json(build_usage_request(refreshed.access_token), timeout)
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace").strip()
+        suffix = f": {details}" if details else ""
+        raise ClaudeUsageError(
+            f"Claude API returned HTTP {exc.code} after token refresh{suffix}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise ClaudeUsageError(f"Request failed after token refresh: {exc.reason}") from exc
 
 
 def _parse_utilization(value: Any) -> float:
@@ -181,6 +342,17 @@ def build_claude_rows(
             )
         )
     return rows
+
+
+def build_claude_refresh_rows(
+    payload: dict[str, Any],
+    *,
+    include_sonnet: bool,
+) -> list[tuple[str, float]]:
+    return [
+        (row.label, row.left_percent)
+        for row in build_claude_rows(payload, timezone.utc, include_sonnet=include_sonnet)
+    ]
 
 
 def _load_font(size: int, *, font_path: str | None = None) -> ImageFont.FreeTypeFont:

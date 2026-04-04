@@ -118,6 +118,8 @@ uv run bluetag push photo.png -i 80
 
 `loop` 会先定位目标设备，然后在 Codex usage 和 Claude Code usage 两张面板之间交替刷新。单次抓取或单次推送失败只会跳过本轮，不会中断整个循环；`Ctrl+C` 可优雅退出。
 
+为降低电子墨水屏闪烁，`loop` 会在推送前比较 usage 的整数百分比和进度条实际像素宽度；如果没有有意义的变化，就跳过这次整屏刷新。
+
 ## Python API
 
 ```python

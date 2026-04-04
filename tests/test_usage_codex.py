@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from zoneinfo import ZoneInfo
 
-from bluetag.usage_codex import build_codex_rows, render_codex_2_13, render_codex_3_7
+from bluetag.usage_codex import (
+    build_codex_refresh_rows,
+    build_codex_rows,
+    render_codex_2_13,
+    render_codex_3_7,
+)
 
 
 class CodexUsageTests(unittest.TestCase):
@@ -51,6 +56,26 @@ class CodexUsageTests(unittest.TestCase):
 
         self.assertEqual(small.size, (250, 122))
         self.assertEqual(large.size, (416, 240))
+
+    def test_build_codex_refresh_rows(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 45.2,
+                    "limit_window_seconds": 18_000,
+                    "reset_at": 1_775_242_400,
+                },
+                "secondary_window": {
+                    "used_percent": 12.0,
+                    "limit_window_seconds": 604_800,
+                    "reset_at": 1_775_520_000,
+                },
+            }
+        }
+
+        rows = build_codex_refresh_rows(payload)
+
+        self.assertEqual(rows, [("5h limit", 54.8), ("weekly limit", 88.0)])
 
 
 if __name__ == "__main__":

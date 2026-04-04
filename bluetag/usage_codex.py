@@ -369,6 +369,37 @@ def build_codex_rows(payload: dict[str, Any], tzinfo) -> list[UsageRow]:
     return rows[:2]
 
 
+def build_codex_refresh_rows(payload: dict[str, Any]) -> list[tuple[str, float]]:
+    primary, secondary = extract_rate_limits(payload)
+
+    rows = [
+        (
+            format_window_label(primary.get("window_minutes"), "5h limit"),
+            max(
+                0.0,
+                min(100.0, 100.0 - parse_used_percent(primary.get("used_percent"))),
+            ),
+        )
+    ]
+
+    if secondary:
+        rows.append(
+            (
+                format_window_label(secondary.get("window_minutes"), "weekly limit"),
+                max(
+                    0.0,
+                    min(
+                        100.0,
+                        100.0
+                        - parse_used_percent(secondary.get("used_percent")),
+                    ),
+                ),
+            )
+        )
+
+    return rows[:2]
+
+
 def _load_font(size: int, *, font_path: str | None = None) -> ImageFont.FreeTypeFont:
     if font_path:
         return ImageFont.truetype(font_path, size)
