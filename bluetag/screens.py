@@ -64,6 +64,23 @@ SCREEN_PROFILES: dict[str, ScreenProfile] = {
         settle_ms=1500,
         encoding="row",
     ),
+    "2.9inch": ScreenProfile(
+        name="2.9inch",
+        aliases=("2.9", "2.9inch"),
+        width=296,
+        height=128,
+        device_prefix="EDP-",
+        cache_file=".device.2.9inch",
+        transport="layer",
+        default_interval_ms=100,
+        mirror=True,
+        rotate=90,
+        swap_wh=True,
+        detect_red=True,
+        flush_every=0,
+        settle_ms=1500,
+        encoding="row",
+    ),
 }
 
 _ALIAS_TO_SCREEN = {

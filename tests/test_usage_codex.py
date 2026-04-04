@@ -7,6 +7,7 @@ from bluetag.usage_codex import (
     build_codex_refresh_rows,
     build_codex_rows,
     render_codex_2_13,
+    render_codex_2_9,
     render_codex_3_7,
 )
 
@@ -52,9 +53,11 @@ class CodexUsageTests(unittest.TestCase):
         }
 
         small = render_codex_2_13(payload, ZoneInfo("UTC"))
+        medium = render_codex_2_9(payload, ZoneInfo("UTC"))
         large = render_codex_3_7(payload, ZoneInfo("UTC"))
 
         self.assertEqual(small.size, (250, 122))
+        self.assertEqual(medium.size, (296, 128))
         self.assertEqual(large.size, (416, 240))
 
     def test_build_codex_refresh_rows(self) -> None:

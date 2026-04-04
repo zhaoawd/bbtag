@@ -18,6 +18,8 @@ DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
 USAGE_PATH = "/wham/usage"
 WIDTH_2_13 = 250
 HEIGHT_2_13 = 122
+WIDTH_2_9 = 296
+HEIGHT_2_9 = 128
 WIDTH_3_7 = 416
 HEIGHT_3_7 = 240
 
@@ -450,9 +452,9 @@ def _render_rows_small(
     *,
     title_text: str,
     font_path: str | None,
+    width: int = WIDTH_2_13,
+    height: int = HEIGHT_2_13,
 ) -> Image.Image:
-    width = WIDTH_2_13
-    height = HEIGHT_2_13
     image, draw = _new_crisp_canvas(width, height)
 
     title_font = _load_font(13, font_path=font_path)
@@ -607,6 +609,16 @@ def render_codex_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = N
         build_codex_rows(payload, tzinfo),
         title_text="codex",
         font_path=font_path,
+    )
+
+
+def render_codex_2_9(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
+    return _render_rows_small(
+        build_codex_rows(payload, tzinfo),
+        title_text="codex",
+        font_path=font_path,
+        width=WIDTH_2_9,
+        height=HEIGHT_2_9,
     )
 
 

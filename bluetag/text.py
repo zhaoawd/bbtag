@@ -176,7 +176,7 @@ def render_text(
     )
     # 电子墨水屏小字优化：字号较小时禁用抗锯齿，避免笔画发灰
     smallest_size = min((t_size if title else 999), b_size)
-    if profile.name == "2.13inch" or smallest_size <= 16:
+    if profile.name in ("2.13inch", "2.9inch") or smallest_size <= 16:
         draw.fontmode = "1"
 
     # 正文极小字号时自动加粗以提升可读性

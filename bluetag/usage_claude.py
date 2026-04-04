@@ -22,6 +22,8 @@ TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 WIDTH_2_13 = 250
 HEIGHT_2_13 = 122
+WIDTH_2_9 = 296
+HEIGHT_2_9 = 128
 WIDTH_3_7 = 416
 HEIGHT_3_7 = 240
 
@@ -399,9 +401,16 @@ def _draw_small_progress_bar(
         )
 
 
-def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
+def _render_claude_small(
+    payload: dict[str, Any],
+    tzinfo,
+    font_path: str | None = None,
+    *,
+    width: int = WIDTH_2_13,
+    height: int = HEIGHT_2_13,
+) -> Image.Image:
     rows = build_claude_rows(payload, tzinfo, include_sonnet=False)
-    image, draw = _new_crisp_canvas(WIDTH_2_13, HEIGHT_2_13)
+    image, draw = _new_crisp_canvas(width, height)
 
     title_font = _load_font(13, font_path=font_path)
     label_font = _load_font(11, font_path=font_path)
@@ -420,7 +429,7 @@ def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = 
     title_w = title_bbox[2] - title_bbox[0]
     title_h = title_bbox[3] - title_bbox[1]
     draw.text(
-        ((WIDTH_2_13 - title_w) // 2, top_pad),
+        ((width - title_w) // 2, top_pad),
         title_text,
         fill=0,
         font=title_font,
@@ -429,7 +438,7 @@ def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = 
     rows_top = top_pad + title_h + title_gap
     row_count = max(1, len(rows))
     row_height = (
-        HEIGHT_2_13 - rows_top - bottom_pad - gap * (row_count - 1)
+        height - rows_top - bottom_pad - gap * (row_count - 1)
     ) // row_count
 
     for index, row in enumerate(rows):
@@ -443,7 +452,7 @@ def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = 
 
         draw.text((left_pad, row_top), row.label, fill=0, font=label_font)
         draw.text(
-            (WIDTH_2_13 - right_pad - percent_w, row_top),
+            (width - right_pad - percent_w, row_top),
             percent_text,
             fill=0,
             font=stat_font,
@@ -454,7 +463,7 @@ def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = 
             draw,
             x=left_pad,
             y=bar_y,
-            width=WIDTH_2_13 - left_pad - right_pad - 1,
+            width=width - left_pad - right_pad - 1,
             height=12,
             percent=row.left_percent,
         )
@@ -462,13 +471,21 @@ def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = 
         detail_bbox = draw.textbbox((0, 0), row.resets_text, font=detail_font)
         detail_w = detail_bbox[2] - detail_bbox[0]
         draw.text(
-            (WIDTH_2_13 - right_pad - detail_w, bar_y + 16),
+            (width - right_pad - detail_w, bar_y + 16),
             row.resets_text,
             fill=0,
             font=detail_font,
         )
 
     return image.convert("RGB")
+
+
+def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
+    return _render_claude_small(payload, tzinfo, font_path)
+
+
+def render_claude_2_9(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
+    return _render_claude_small(payload, tzinfo, font_path, width=WIDTH_2_9, height=HEIGHT_2_9)
 
 
 def _draw_large_progress_bar(
@@ -499,6 +516,36 @@ def _draw_large_progress_bar(
 
 def render_claude_3_7(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
     rows = build_claude_rows(payload, tzinfo, include_sonnet=True)
+    row_map = {row.label: row for row in rows}
+    rows = [
+        row_map.get(
+            "5h session",
+            UsageRow(
+                label="5h session",
+                left_percent=0.0,
+                used_percent=100.0,
+                resets_text="resets unknown",
+            ),
+        ),
+        row_map.get(
+            "7d all models",
+            UsageRow(
+                label="7d all models",
+                left_percent=0.0,
+                used_percent=100.0,
+                resets_text="resets unknown",
+            ),
+        ),
+        row_map.get(
+            "sonnet",
+            UsageRow(
+                label="sonnet",
+                left_percent=0.0,
+                used_percent=100.0,
+                resets_text="resets unknown",
+            ),
+        ),
+    ]
     image = Image.new("RGB", (WIDTH_3_7, HEIGHT_3_7), "white")
     draw = ImageDraw.Draw(image)
 
@@ -507,21 +554,21 @@ def render_claude_3_7(payload: dict[str, Any], tzinfo, font_path: str | None = N
 
     title_font = _load_font(21, font_path=font_path)
     time_font = _load_font(14, font_path=font_path)
-    section_font = _load_font(18, font_path=font_path)
-    stat_font = _load_font(20, font_path=font_path)
-    detail_font = _load_font(13, font_path=font_path)
+    section_font = _load_font(15, font_path=font_path)
+    stat_font = _load_font(18, font_path=font_path)
+    detail_font = _load_font(11, font_path=font_path)
 
     draw.text((14, 9), "CC USAGE", fill="white", font=title_font)
-    draw.text(
-        (WIDTH_3_7 - 78, 13),
-        datetime.now(tzinfo).strftime("%H:%M"),
-        fill="white",
-        font=time_font,
-    )
+    time_text = datetime.now(tzinfo).strftime("%H:%M")
+    time_bbox = draw.textbbox((0, 0), time_text, font=time_font)
+    time_w = time_bbox[2] - time_bbox[0]
+    draw.text((WIDTH_3_7 - 14 - time_w, 13), time_text, fill="white", font=time_font)
 
-    top = header_h + 10
-    segment_h = 58
-    gap = 10
+    top = header_h + 8
+    segment_h = 54
+    gap = 6
+    outer_left = 14
+    outer_right = 14
     labels = {
         "5h session": "SESSION",
         "7d all models": "ALL MODELS",
@@ -531,19 +578,19 @@ def render_claude_3_7(payload: dict[str, Any], tzinfo, font_path: str | None = N
     for index, row in enumerate(rows[:3]):
         y = top + index * (segment_h + gap)
         draw.rounded_rectangle(
-            (10, y, WIDTH_3_7 - 10, y + segment_h),
-            radius=10,
+            (outer_left, y, WIDTH_3_7 - outer_right, y + segment_h),
+            radius=9,
             outline="black",
             width=2,
         )
         header_label = labels.get(row.label, row.label.upper())
-        draw.text((20, y + 8), header_label, fill="black", font=section_font)
+        draw.text((24, y + 7), header_label, fill="black", font=section_font)
 
         percent_text = f"{int(round(row.left_percent))}% left"
         percent_bbox = draw.textbbox((0, 0), percent_text, font=stat_font)
         percent_w = percent_bbox[2] - percent_bbox[0]
         draw.text(
-            (WIDTH_3_7 - 20 - percent_w, y + 6),
+            (WIDTH_3_7 - 24 - percent_w, y + 5),
             percent_text,
             fill="red" if row.used_percent >= 80.0 else "black",
             font=stat_font,
@@ -551,13 +598,13 @@ def render_claude_3_7(payload: dict[str, Any], tzinfo, font_path: str | None = N
 
         _draw_large_progress_bar(
             draw,
-            x=20,
-            y=y + 30,
-            width=WIDTH_3_7 - 40,
-            height=16,
+            x=24,
+            y=y + 24,
+            width=WIDTH_3_7 - 48,
+            height=12,
             left_percent=row.left_percent,
             used_percent=row.used_percent,
         )
-        draw.text((20, y + 47), row.resets_text, fill="black", font=detail_font)
+        draw.text((24, y + 36), row.resets_text, fill="black", font=detail_font)
 
     return image

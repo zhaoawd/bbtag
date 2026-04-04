@@ -32,12 +32,14 @@ from bluetag.usage_claude import (
     build_claude_refresh_rows,
     fetch_claude_usage,
     render_claude_2_13,
+    render_claude_2_9,
     render_claude_3_7,
 )
 from bluetag.usage_codex import (
     build_codex_refresh_rows,
     fetch_codex_usage,
     render_codex_2_13,
+    render_codex_2_9,
     render_codex_3_7,
 )
 
@@ -278,6 +280,28 @@ def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
             ),
         ]
 
+    if screen == "2.9inch":
+        return [
+            UsageLoopSource(
+                name="codex",
+                timeout=30.0,
+                fetch=fetch_codex_usage,
+                refresh_rows=build_codex_refresh_rows,
+                bar_inner_width=278,
+                render=render_codex_2_9,
+            ),
+            UsageLoopSource(
+                name="claude",
+                timeout=10.0,
+                fetch=fetch_claude_usage,
+                refresh_rows=lambda payload: build_claude_refresh_rows(
+                    payload, include_sonnet=False
+                ),
+                bar_inner_width=278,
+                render=render_claude_2_9,
+            ),
+        ]
+
     return [
         UsageLoopSource(
             name="codex",
@@ -376,7 +400,8 @@ async def _run_loop_cycle(
             await sleep(interval_seconds)
             continue
 
-        reason = _refresh_reason(states.get(source.name), current_state)
+        previous = states.get(source.name)
+        reason = _refresh_reason(previous, current_state)
         if reason is None:
             print(f"skip {source.name} refresh: no meaningful value change")
             await sleep(interval_seconds)

@@ -341,9 +341,9 @@ class CliLoopTests(unittest.TestCase):
             ],
         )
 
-    def test_run_loop_cycle_pushes_when_percent_changes_by_two(self) -> None:
+    def test_run_loop_cycle_pushes_when_bar_px_changes_by_threshold(self) -> None:
         events: list[tuple[str, object]] = []
-        percents = iter([100.0, 98.0])
+        percents = iter([100.0, 97.0])
 
         def fetch(*, timeout: float):
             events.append(("fetch", "codex"))
@@ -478,6 +478,143 @@ class CliLoopTests(unittest.TestCase):
                 ("fetch", "codex"),
                 ("render", "codex"),
                 ("push", "image:codex"),
+                ("sleep", 10),
+            ],
+        )
+
+    def test_run_loop_cycle_ignores_reset_text_changes(self) -> None:
+        events: list[tuple[str, object]] = []
+        reset_texts = iter(["resets 14:00", "resets 14:01"])
+
+        def fetch(*, timeout: float):
+            events.append(("fetch", "codex"))
+            return {"name": "codex"}
+
+        def refresh_rows(payload):
+            return [("5h limit", 54.8)]
+
+        def render(payload, tzinfo, *, font_path=None):
+            events.append(("render", payload["name"]))
+            next(reset_texts)
+            return "image:codex"
+
+        async def push_image(image):
+            events.append(("push", image))
+            return True
+
+        async def sleep(seconds: float):
+            events.append(("sleep", seconds))
+
+        source = UsageLoopSource(
+            name="codex",
+            timeout=9.0,
+            fetch=fetch,
+            refresh_rows=refresh_rows,
+            bar_inner_width=100,
+            render=render,
+        )
+
+        states = asyncio.run(
+            _run_loop_cycle(
+                sources=[source],
+                screen_name="2.13inch",
+                tzinfo=ZoneInfo("UTC"),
+                font_path=None,
+                push_image=push_image,
+                interval_seconds=10,
+                sleep=sleep,
+            )
+        )
+        asyncio.run(
+            _run_loop_cycle(
+                sources=[source],
+                screen_name="2.13inch",
+                tzinfo=ZoneInfo("UTC"),
+                font_path=None,
+                push_image=push_image,
+                interval_seconds=10,
+                sleep=sleep,
+                refresh_states=states,
+            )
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("fetch", "codex"),
+                ("render", "codex"),
+                ("push", "image:codex"),
+                ("sleep", 10),
+                ("fetch", "codex"),
+                ("sleep", 10),
+            ],
+        )
+
+
+    def test_run_loop_cycle_ignores_resets_text_changes(self) -> None:
+        events: list[tuple[str, object]] = []
+        resets = iter(["resets 18:00", "resets 19:00"])
+
+        def fetch(*, timeout: float):
+            events.append(("fetch", "codex"))
+            return {"name": "codex"}
+
+        def refresh_rows(payload):
+            next(resets)
+            return [("5h limit", 54.8)]
+
+        def render(payload, tzinfo, *, font_path=None):
+            events.append(("render", payload["name"]))
+            return "image:codex"
+
+        async def push_image(image):
+            events.append(("push", image))
+            return True
+
+        async def sleep(seconds: float):
+            events.append(("sleep", seconds))
+
+        source = UsageLoopSource(
+            name="codex",
+            timeout=9.0,
+            fetch=fetch,
+            refresh_rows=refresh_rows,
+            bar_inner_width=100,
+            render=render,
+        )
+
+        states = asyncio.run(
+            _run_loop_cycle(
+                sources=[source],
+                screen_name="2.13inch",
+                tzinfo=ZoneInfo("UTC"),
+                font_path=None,
+                push_image=push_image,
+                interval_seconds=10,
+                sleep=sleep,
+            )
+        )
+        asyncio.run(
+            _run_loop_cycle(
+                sources=[source],
+                screen_name="2.13inch",
+                tzinfo=ZoneInfo("UTC"),
+                font_path=None,
+                push_image=push_image,
+                interval_seconds=10,
+                sleep=sleep,
+                refresh_states=states,
+            )
+        )
+
+        self.assertEqual(
+            events,
+            [
+                ("fetch", "codex"),
+                ("render", "codex"),
+                ("push", "image:codex"),
+                ("sleep", 10),
+                ("fetch", "codex"),
                 ("sleep", 10),
             ],
         )
