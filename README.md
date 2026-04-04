@@ -2,12 +2,13 @@
 
 BT370R 蓝签电子墨水标签 BLE 图像推送库。
 
-支持两类屏幕:
+支持三类屏幕:
 
 - `3.7inch` (`240×416`, 4 色, 设备名前缀 `EPD-`)
 - `2.13inch` (`250×122`, 黑/白/红, 设备名前缀 `EDP-`)
+- `2.9inch` (`296×128`, 黑/白/红, 设备名前缀暂按 `EDP-` 处理)
 
-CLI 会按 `--screen` 自动切换发送协议，并分别缓存到 `.device.3.7inch` / `.device.2.13inch`。默认屏幕是 `3.7inch`。
+CLI 会按 `--screen` 自动切换发送协议，并分别缓存到 `.device.3.7inch` / `.device.2.13inch` / `.device.2.9inch`。默认屏幕是 `3.7inch`。
 
 ## 快速开始
 
@@ -40,17 +41,26 @@ uv run bluetag scan
 # 扫描 2.13 寸设备
 uv run bluetag scan --screen 2.13inch
 
+# 扫描 2.9 寸设备
+uv run bluetag scan --screen 2.9inch
+
 # 推送图片
 uv run bluetag push photo.png
 
 # 推送到 2.13 寸
 uv run bluetag push photo.png --screen 2.13inch
 
+# 推送到 2.9 寸
+uv run bluetag push photo.png --screen 2.9inch
+
 # 推送文字 (自动排版)
 uv run bluetag text "14:00 项目评审\n16:00 周会"
 
 # 给 2.13 寸推送文字
 uv run bluetag text "会议室A\n14:00-15:30" --screen 2.13inch
+
+# 给 2.9 寸推送文字
+uv run bluetag text "会议室A\n14:00-15:30" --screen 2.9inch
 
 # 把 Codex usage 画成 /stats 风格并推到 2.13 寸
 uv run examples/push_codex_usage.py
@@ -60,6 +70,9 @@ uv run examples/push_codex_usage.py --preview-only
 
 # 交替刷新 Codex / Claude Code usage 到 2.13 寸
 uv run bluetag loop --screen 2.13inch
+
+# 交替刷新 Codex / Claude Code usage 到 2.9 寸
+uv run bluetag loop --screen 2.9inch
 
 # 指定时区和刷新间隔
 uv run bluetag loop --screen 3.7inch --interval 120 --timezone Asia/Shanghai
@@ -101,7 +114,7 @@ uv run bluetag push photo.png -i 80
 | `--align` | 正文对齐: left / center |
 | `--font` | 自定义字体路径 |
 | `--preview-only` | 仅生成预览图，不推送 |
-| `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` |
+| `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` / `2.9inch` |
 
 文字排版会根据 `--screen` 自动切换画布尺寸和字号策略。标题尽量大 (最多 2 行)，正文自动缩小直到全部放得下。
 
@@ -109,7 +122,7 @@ uv run bluetag push photo.png -i 80
 
 | 参数 | 说明 |
 |------|------|
-| `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` |
+| `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` / `2.9inch` |
 | `--interval` | 刷新间隔秒数，默认 `90` |
 | `--device, -d` | 设备名 |
 | `--address, -a` | 设备 BLE 地址 |
@@ -118,7 +131,11 @@ uv run bluetag push photo.png -i 80
 
 `loop` 会先定位目标设备，然后在 Codex usage 和 Claude Code usage 两张面板之间交替刷新。单次抓取或单次推送失败只会跳过本轮，不会中断整个循环；`Ctrl+C` 可优雅退出。
 
-为降低电子墨水屏闪烁，`loop` 会在推送前比较 usage 的整数百分比和进度条实际像素宽度；如果没有有意义的变化，就跳过这次整屏刷新。
+为降低电子墨水屏闪烁，`loop` 会在推送前比较 usage 变化；只有剩余百分比变化至少 `2%`，或进度条宽度变化至少 `3px` 时，才会触发整屏刷新。
+
+Claude Code usage 会优先使用 Keychain 中的 `accessToken` 请求；如果返回 `token_expired`，会自动使用 `refreshToken` 换取新 token 后重试一次。
+
+`2.9inch` 当前的 BLE 协议参数是参照 `2.13inch` 设置的，已经补了渲染与 loop 支持，但 `device_prefix`、`encoding`、`settle_ms` 等仍建议按实机表现继续校正。
 
 ## Python API
 
