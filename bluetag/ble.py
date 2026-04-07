@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from pprint import pformat
 
 
 class BleDependencyError(ModuleNotFoundError):
@@ -46,6 +47,22 @@ def _normalize_prefixes(prefixes: Iterable[str] | None) -> tuple[str, ...]:
 
 def _matches_prefix(name: str | None, prefixes: tuple[str, ...]) -> bool:
     return bool(name) and any(name.startswith(prefix) for prefix in prefixes)
+
+
+def _device_name(device, adv) -> str | None:
+    return device.name or getattr(adv, "local_name", None)
+
+
+def _debug_scan_result(addr: str, device, adv) -> None:
+    summary = {
+        "address": addr,
+        "device_name": getattr(device, "name", None),
+        "adv_local_name": getattr(adv, "local_name", None),
+        "rssi": getattr(adv, "rssi", None),
+    }
+    print("[scan raw]", pformat(summary, sort_dicts=False))
+    print("[scan raw] device =", repr(device))
+    print("[scan raw] adv =", repr(adv))
 
 
 def _resolve_read_uuid(client) -> str | None:
@@ -126,6 +143,7 @@ class BleSession:
 async def scan(
     timeout: float = SCAN_TIMEOUT,
     prefixes: Iterable[str] | None = None,
+    debug_raw: bool = False,
 ) -> list[dict]:
     """
     扫描附近的蓝签设备。
@@ -137,11 +155,14 @@ async def scan(
     resolved_prefixes = _normalize_prefixes(prefixes)
     results = await BleakScanner.discover(timeout=timeout, return_adv=True)
     devices = []
-    for _addr, (device, adv) in results.items():
-        if _matches_prefix(device.name, resolved_prefixes):
+    for addr, (device, adv) in results.items():
+        if debug_raw:
+            _debug_scan_result(addr, device, adv)
+        name = _device_name(device, adv)
+        if _matches_prefix(name, resolved_prefixes):
             devices.append(
                 {
-                    "name": device.name,
+                    "name": name,
                     "address": device.address,
                     "rssi": adv.rssi,
                     "_ble_device": device,

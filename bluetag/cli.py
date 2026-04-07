@@ -431,7 +431,11 @@ def cmd_scan(args):
 
     async def _scan():
         print(f"扫描蓝签设备 ({profile.name}, {args.timeout}s)...")
-        devices = await scan(timeout=args.timeout, prefixes=(profile.device_prefix,))
+        devices = await scan(
+            timeout=args.timeout,
+            prefixes=(profile.device_prefix,),
+            debug_raw=args.debug_raw,
+        )
         if not devices:
             print("  未发现蓝签设备")
             return
@@ -667,6 +671,11 @@ def main():
     scan_p = sub.add_parser("scan", help="扫描附近的蓝签设备")
     scan_p.add_argument(
         "--timeout", "-t", type=float, default=5.0, help="扫描超时 (秒)"
+    )
+    scan_p.add_argument(
+        "--debug-raw",
+        action="store_true",
+        help="打印过滤前的原始 BLE 发现结果",
     )
     scan_p.add_argument("--screen", default=DEFAULT_SCREEN, help=screen_help)
 

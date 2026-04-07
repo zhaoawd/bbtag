@@ -105,8 +105,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default=DEFAULT_OUTPUT,
-        help=f"预览图输出路径，默认 {DEFAULT_OUTPUT}",
+        help="预览图输出路径，默认按屏幕尺寸自动命名",
     )
     parser.add_argument(
         "--input-json",
@@ -590,6 +589,24 @@ def save_preview(image: Image.Image, output_path: Path) -> Path:
     return output_path
 
 
+def default_output_for_screen(screen: str) -> str:
+    if screen == "2.9inch":
+        return "codex-usage-2.9inch.png"
+    return DEFAULT_OUTPUT
+
+
+def render_usage_for_screen(
+    payload: dict[str, Any],
+    *,
+    screen: str,
+    tzinfo,
+    font_path: str | None = None,
+) -> Image.Image:
+    if screen == "2.9inch":
+        return usage_codex.render_codex_2_9(payload, tzinfo, font_path=font_path)
+    return usage_codex.render_codex_2_13(payload, tzinfo, font_path=font_path)
+
+
 def _save_device(device: dict, profile):
     profile.cache_path.write_text(f"{device['name']}\n{device['address']}\n")
 
@@ -613,11 +630,10 @@ async def _find_target(args, profile) -> dict | None:
         cached = _load_device(profile)
         if cached:
             print(
-                f"使用 {profile.name} 缓存设备作为扫描目标: "
+                f"使用 {profile.name} 缓存设备直接连接: "
                 f"{cached['name']} ({cached['address']})"
             )
-            search_name = cached["name"]
-            search_address = cached["address"]
+            return cached
 
     print(
         f"扫描 {profile.name} 设备 "
@@ -732,16 +748,27 @@ def load_usage_payload(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
 def main() -> int:
     args = parse_args()
     profile = get_screen_profile(args.screen)
-    if profile.name != "2.13inch":
-        print("❌ 当前脚本只为 2.13 寸布局设计，请使用 --screen 2.13inch", file=sys.stderr)
+    if profile.transport != "layer":
+        print(
+            "❌ 当前脚本只支持 2.13 寸 / 2.9 寸布局，请使用 --screen 2.13inch 或 2.9inch",
+            file=sys.stderr,
+        )
         return 2
 
     try:
         payload, source = load_usage_payload(args)
         tzinfo = usage_codex.resolve_timezone(args.timezone)
         rows = usage_codex.build_codex_rows(payload, tzinfo)
-        image = usage_codex.render_codex_2_13(payload, tzinfo, font_path=args.font)
-        output_path = save_preview(image, Path(args.output))
+        image = render_usage_for_screen(
+            payload,
+            screen=profile.name,
+            tzinfo=tzinfo,
+            font_path=args.font,
+        )
+        output_path = save_preview(
+            image,
+            Path(args.output or default_output_for_screen(profile.name)),
+        )
         print(f"预览已保存: {output_path}")
         print(f"Usage 来源: {source}")
 
