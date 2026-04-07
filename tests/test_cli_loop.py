@@ -4,7 +4,7 @@ import asyncio
 import unittest
 from zoneinfo import ZoneInfo
 
-from bluetag.cli import UsageLoopSource, _run_loop_cycle
+from bluetag.cli import UsageLoopSource, _build_refresh_state, _run_loop_cycle
 
 
 class CliLoopTests(unittest.TestCase):
@@ -34,9 +34,9 @@ class CliLoopTests(unittest.TestCase):
                 render=render,
             )
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return True
+            return True, None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))
@@ -67,6 +67,128 @@ class CliLoopTests(unittest.TestCase):
             ],
         )
 
+    def test_run_loop_cycle_passes_prev_layer_bytes_for_partial_refresh(self) -> None:
+        push_calls: list[tuple[str, object, bytes | None, bytes | None]] = []
+
+        def fetch(*, timeout: float):
+            return {"name": "codex"}
+
+        def refresh_rows(payload):
+            return [("5h limit", 57.0)]
+
+        def render(payload, tzinfo, *, font_path=None):
+            return "image:codex"
+
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
+            push_calls.append((source_name, image, prev_black, prev_red))
+            return True, (b"new-black", b"new-red")
+
+        async def sleep(_: float):
+            return None
+
+        source = UsageLoopSource(
+            name="codex",
+            timeout=9.0,
+            fetch=fetch,
+            refresh_rows=refresh_rows,
+            bar_inner_width=100,
+            render=render,
+        )
+        prev_layer_bytes = {"codex": (b"old-black", b"old-red")}
+        push_counts = {"codex": 2}
+        refresh_states = {
+            "codex": _build_refresh_state(
+                source_name="codex",
+                screen_name="2.13inch",
+                rows=[("5h limit", 54.8)],
+                bar_inner_width=100,
+            )
+        }
+
+        asyncio.run(
+            _run_loop_cycle(
+                sources=[source],
+                screen_name="2.13inch",
+                tzinfo=ZoneInfo("UTC"),
+                font_path=None,
+                push_image=push_image,
+                interval_seconds=10,
+                sleep=sleep,
+                refresh_states=refresh_states,
+                prev_layer_bytes=prev_layer_bytes,
+                push_counts=push_counts,
+                full_refresh_every=5,
+            )
+        )
+
+        self.assertEqual(
+            push_calls,
+            [("codex", "image:codex", b"old-black", b"old-red")],
+        )
+        self.assertEqual(prev_layer_bytes["codex"], (b"new-black", b"new-red"))
+        self.assertEqual(push_counts["codex"], 3)
+
+    def test_run_loop_cycle_forces_full_refresh_after_threshold(self) -> None:
+        push_calls: list[tuple[str, object, bytes | None, bytes | None]] = []
+
+        def fetch(*, timeout: float):
+            return {"name": "codex"}
+
+        def refresh_rows(payload):
+            return [("5h limit", 57.0)]
+
+        def render(payload, tzinfo, *, font_path=None):
+            return "image:codex"
+
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
+            push_calls.append((source_name, image, prev_black, prev_red))
+            return True, (b"full-black", b"full-red")
+
+        async def sleep(_: float):
+            return None
+
+        source = UsageLoopSource(
+            name="codex",
+            timeout=9.0,
+            fetch=fetch,
+            refresh_rows=refresh_rows,
+            bar_inner_width=100,
+            render=render,
+        )
+        prev_layer_bytes = {"codex": (b"old-black", b"old-red")}
+        push_counts = {"codex": 5}
+        refresh_states = {
+            "codex": _build_refresh_state(
+                source_name="codex",
+                screen_name="2.13inch",
+                rows=[("5h limit", 54.8)],
+                bar_inner_width=100,
+            )
+        }
+
+        asyncio.run(
+            _run_loop_cycle(
+                sources=[source],
+                screen_name="2.13inch",
+                tzinfo=ZoneInfo("UTC"),
+                font_path=None,
+                push_image=push_image,
+                interval_seconds=10,
+                sleep=sleep,
+                refresh_states=refresh_states,
+                prev_layer_bytes=prev_layer_bytes,
+                push_counts=push_counts,
+                full_refresh_every=5,
+            )
+        )
+
+        self.assertEqual(
+            push_calls,
+            [("codex", "image:codex", None, None)],
+        )
+        self.assertEqual(prev_layer_bytes["codex"], (b"full-black", b"full-red"))
+        self.assertEqual(push_counts["codex"], 0)
+
     def test_run_loop_cycle_continues_after_source_failure(self) -> None:
         events: list[tuple[str, object]] = []
 
@@ -91,9 +213,9 @@ class CliLoopTests(unittest.TestCase):
             events.append(("render", payload["name"]))
             return "image:claude"
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return True
+            return True, None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))
@@ -153,9 +275,9 @@ class CliLoopTests(unittest.TestCase):
             events.append(("render", payload["name"]))
             return "image:codex"
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return True
+            return True, None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))
@@ -220,9 +342,9 @@ class CliLoopTests(unittest.TestCase):
             events.append(("render", payload["name"]))
             return "image:codex"
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return True
+            return True, None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))
@@ -289,9 +411,9 @@ class CliLoopTests(unittest.TestCase):
             events.append(("render", payload["name"]))
             return "image:codex"
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return True
+            return True, None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))
@@ -356,9 +478,9 @@ class CliLoopTests(unittest.TestCase):
             events.append(("render", payload["name"]))
             return "image:codex"
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return True
+            return True, None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))
@@ -426,9 +548,9 @@ class CliLoopTests(unittest.TestCase):
 
         push_results = iter([False, True])
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return next(push_results)
+            return next(push_results), None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))
@@ -482,75 +604,6 @@ class CliLoopTests(unittest.TestCase):
             ],
         )
 
-    def test_run_loop_cycle_ignores_reset_text_changes(self) -> None:
-        events: list[tuple[str, object]] = []
-        reset_texts = iter(["resets 14:00", "resets 14:01"])
-
-        def fetch(*, timeout: float):
-            events.append(("fetch", "codex"))
-            return {"name": "codex"}
-
-        def refresh_rows(payload):
-            return [("5h limit", 54.8)]
-
-        def render(payload, tzinfo, *, font_path=None):
-            events.append(("render", payload["name"]))
-            next(reset_texts)
-            return "image:codex"
-
-        async def push_image(image):
-            events.append(("push", image))
-            return True
-
-        async def sleep(seconds: float):
-            events.append(("sleep", seconds))
-
-        source = UsageLoopSource(
-            name="codex",
-            timeout=9.0,
-            fetch=fetch,
-            refresh_rows=refresh_rows,
-            bar_inner_width=100,
-            render=render,
-        )
-
-        states = asyncio.run(
-            _run_loop_cycle(
-                sources=[source],
-                screen_name="2.13inch",
-                tzinfo=ZoneInfo("UTC"),
-                font_path=None,
-                push_image=push_image,
-                interval_seconds=10,
-                sleep=sleep,
-            )
-        )
-        asyncio.run(
-            _run_loop_cycle(
-                sources=[source],
-                screen_name="2.13inch",
-                tzinfo=ZoneInfo("UTC"),
-                font_path=None,
-                push_image=push_image,
-                interval_seconds=10,
-                sleep=sleep,
-                refresh_states=states,
-            )
-        )
-
-        self.assertEqual(
-            events,
-            [
-                ("fetch", "codex"),
-                ("render", "codex"),
-                ("push", "image:codex"),
-                ("sleep", 10),
-                ("fetch", "codex"),
-                ("sleep", 10),
-            ],
-        )
-
-
     def test_run_loop_cycle_ignores_resets_text_changes(self) -> None:
         events: list[tuple[str, object]] = []
         resets = iter(["resets 18:00", "resets 19:00"])
@@ -567,9 +620,9 @@ class CliLoopTests(unittest.TestCase):
             events.append(("render", payload["name"]))
             return "image:codex"
 
-        async def push_image(image):
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
             events.append(("push", image))
-            return True
+            return True, None
 
         async def sleep(seconds: float):
             events.append(("sleep", seconds))

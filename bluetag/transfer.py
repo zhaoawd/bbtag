@@ -9,11 +9,18 @@ from bluetag.ble import BleSession
 
 BLACK_TYPE = 0x13
 RED_TYPE = 0x12
-LAYER_PAYLOAD_SIZE = 16
+LAYER_ROW_BYTES = 16
 START_PACKET = bytes([0x00, 0x00, 0x00, 0x00])
 END_PACKET = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
 ProgressCallback = Callable[[str, int, int], None]
+
+
+def _compute_chunk_size(data_len: int) -> int:
+    """chunk 大小为 LAYER_ROW_BYTES 的整数倍，且总包数 < 256。"""
+    min_bytes = (data_len + 254) // 255
+    rows_needed = (min_bytes + LAYER_ROW_BYTES - 1) // LAYER_ROW_BYTES
+    return max(1, rows_needed) * LAYER_ROW_BYTES
 
 
 async def _send_layer(
@@ -25,12 +32,14 @@ async def _send_layer(
     delay_ms: int,
     flush_every: int,
     on_progress: ProgressCallback | None,
+    prev_data: bytes | None = None,
 ) -> bool:
     try:
         await session.write(bytes([layer_type]) + START_PACKET, response=False)
         await asyncio.sleep(delay_ms / 1000.0)
 
-        total_packets = (len(data) + LAYER_PAYLOAD_SIZE - 1) // LAYER_PAYLOAD_SIZE
+        chunk_size = _compute_chunk_size(len(data))
+        total_packets = (len(data) + chunk_size - 1) // chunk_size
         await asyncio.sleep(1.0)
 
         first_packet_sent = False
@@ -39,9 +48,14 @@ async def _send_layer(
         packet_index = 1
         offset = 0
         while offset < len(data):
-            chunk_size = min(LAYER_PAYLOAD_SIZE, len(data) - offset)
-            chunk = data[offset : offset + chunk_size]
-            packet = bytes([layer_type, packet_index & 0xFF, chunk_size]) + chunk
+            chunk_len = min(chunk_size, len(data) - offset)
+            chunk = data[offset : offset + chunk_len]
+            if prev_data is not None and prev_data[offset : offset + chunk_len] == chunk:
+                offset += chunk_len
+                packet_index += 1
+                continue
+
+            packet = bytes([layer_type, packet_index & 0xFF, chunk_len]) + chunk
 
             await session.write(packet, response=False)
             if not first_packet_sent:
@@ -55,7 +69,7 @@ async def _send_layer(
                 await session.flush()
                 writes_since_flush = 0
 
-            offset += chunk_size
+            offset += chunk_len
             if on_progress:
                 on_progress(layer_name, packet_index, total_packets)
             packet_index += 1
@@ -80,6 +94,8 @@ async def send_bicolor_image(
     settle_ms: int,
     flush_every: int = 0,
     on_progress: ProgressCallback | None = None,
+    prev_black_data: bytes | None = None,
+    prev_red_data: bytes | None = None,
 ) -> bool:
     """Send black and red layers using the small-screen legacy format."""
     if not await _send_layer(
@@ -90,6 +106,7 @@ async def send_bicolor_image(
         delay_ms=delay_ms,
         flush_every=flush_every,
         on_progress=on_progress,
+        prev_data=prev_black_data,
     ):
         return False
 
@@ -103,6 +120,7 @@ async def send_bicolor_image(
         delay_ms=delay_ms,
         flush_every=flush_every,
         on_progress=on_progress,
+        prev_data=prev_red_data,
     ):
         return False
 

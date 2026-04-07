@@ -75,6 +75,10 @@ class UsageRefreshState:
     rows: tuple[UsageRefreshRow, ...]
 
 
+LayerBytes = tuple[bytes, bytes]
+LoopPushResult = tuple[bool, LayerBytes | None]
+
+
 def _default_text_title() -> str:
     return f"{date.today():%Y-%m-%d}"
 
@@ -204,6 +208,8 @@ async def _push_layer_image(
     black_data: bytes,
     red_data: bytes,
     interval_ms: int,
+    prev_black_data: bytes | None = None,
+    prev_red_data: bytes | None = None,
 ) -> bool:
     from bluetag.ble import connect_session
 
@@ -228,6 +234,8 @@ async def _push_layer_image(
             settle_ms=profile.settle_ms,
             flush_every=profile.flush_every,
             on_progress=_layer_progress,
+            prev_black_data=prev_black_data,
+            prev_red_data=prev_red_data,
         )
     finally:
         await session.close()
@@ -237,6 +245,8 @@ async def _push_rendered_image(
     profile: ScreenProfile,
     target: dict,
     image: Image.Image,
+    prev_black_data: bytes | None = None,
+    prev_red_data: bytes | None = None,
 ) -> bool:
     interval_ms = profile.default_interval_ms
     if profile.transport == "frame":
@@ -244,7 +254,15 @@ async def _push_rendered_image(
         return await _push_frame_image(profile, target, data_2bpp, interval_ms)
 
     _preview, black_data, red_data = _build_layer_preview_and_payload(image, profile)
-    return await _push_layer_image(profile, target, black_data, red_data, interval_ms)
+    return await _push_layer_image(
+        profile,
+        target,
+        black_data,
+        red_data,
+        interval_ms,
+        prev_black_data=prev_black_data,
+        prev_red_data=prev_red_data,
+    )
 
 
 def _resolve_timezone(name: str | None):
@@ -379,12 +397,20 @@ async def _run_loop_cycle(
     screen_name: str,
     tzinfo,
     font_path: str | None,
-    push_image: Callable[[Image.Image], Awaitable[bool]],
+    push_image: Callable[
+        [str, Image.Image, bytes | None, bytes | None],
+        Awaitable[LoopPushResult],
+    ],
     interval_seconds: float,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     refresh_states: dict[str, UsageRefreshState] | None = None,
+    prev_layer_bytes: dict[str, tuple[bytes, bytes]] | None = None,
+    push_counts: dict[str, int] | None = None,
+    full_refresh_every: int = 5,
 ) -> dict[str, UsageRefreshState]:
     states = {} if refresh_states is None else dict(refresh_states)
+    layer_bytes = {} if prev_layer_bytes is None else prev_layer_bytes
+    partial_counts = {} if push_counts is None else push_counts
 
     for source in sources:
         try:
@@ -409,13 +435,31 @@ async def _run_loop_cycle(
 
         try:
             image = source.render(payload, tzinfo, font_path=font_path)
-            ok = await push_image(image)
+            force_full = (
+                full_refresh_every > 0
+                and partial_counts.get(source.name, 0) >= full_refresh_every
+            )
+            if force_full:
+                prev_black = None
+                prev_red = None
+            else:
+                prev_black, prev_red = layer_bytes.get(source.name, (None, None))
+            ok, latest_layer_bytes = await push_image(
+                source.name, image, prev_black, prev_red
+            )
         except Exception as exc:
             print(f"❌ {source.name} push failed: {exc}", file=sys.stderr)
             ok = False
+            latest_layer_bytes = None
 
         if ok:
             states[source.name] = current_state
+            if latest_layer_bytes is not None:
+                layer_bytes[source.name] = latest_layer_bytes
+            if force_full:
+                partial_counts[source.name] = 0
+            else:
+                partial_counts[source.name] = partial_counts.get(source.name, 0) + 1
             print(f"push {source.name} refresh: {reason}")
         else:
             print(f"❌ {source.name} push failed", file=sys.stderr)
@@ -565,8 +609,34 @@ def cmd_loop(args):
             f"间隔 {args.interval}s"
         )
 
-        async def _push(image: Image.Image) -> bool:
-            return await _push_rendered_image(profile, target, image)
+        prev_layer_bytes: dict[str, tuple[bytes, bytes]] = {}
+        push_counts: dict[str, int] = {}
+
+        async def _push(
+            source_name: str,
+            image: Image.Image,
+            prev_black: bytes | None = None,
+            prev_red: bytes | None = None,
+        ) -> LoopPushResult:
+            if profile.transport == "frame":
+                ok = await _push_rendered_image(profile, target, image)
+                return ok, None
+
+            _preview, black_data, red_data = _build_layer_preview_and_payload(
+                image, profile
+            )
+            ok = await _push_layer_image(
+                profile,
+                target,
+                black_data,
+                red_data,
+                profile.default_interval_ms,
+                prev_black_data=prev_black,
+                prev_red_data=prev_red,
+            )
+            if ok:
+                return True, (black_data, red_data)
+            return False, None
 
         refresh_states: dict[str, UsageRefreshState] = {}
         while True:
@@ -578,6 +648,9 @@ def cmd_loop(args):
                 push_image=_push,
                 interval_seconds=float(args.interval),
                 refresh_states=refresh_states,
+                prev_layer_bytes=prev_layer_bytes,
+                push_counts=push_counts,
+                full_refresh_every=args.full_refresh_every,
             )
 
     try:
@@ -742,6 +815,12 @@ def main():
         type=int,
         default=90,
         help="刷新间隔 (秒，默认 90)",
+    )
+    loop_p.add_argument(
+        "--full-refresh-every",
+        type=int,
+        default=5,
+        help="每 N 次局部刷新后强制全刷一次 (默认 5，0 表示禁用)",
     )
     loop_p.add_argument("--timezone", help="时区，例如 Asia/Shanghai")
     loop_p.add_argument("--font", help="自定义字体路径")
