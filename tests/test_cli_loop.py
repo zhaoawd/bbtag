@@ -189,6 +189,68 @@ class CliLoopTests(unittest.TestCase):
         self.assertEqual(prev_layer_bytes["codex"], (b"full-black", b"full-red"))
         self.assertEqual(push_counts["codex"], 0)
 
+    def test_run_loop_cycle_disables_partial_diff_when_profile_does_not_support_it(self) -> None:
+        push_calls: list[tuple[str, object, bytes | None, bytes | None]] = []
+
+        def fetch(*, timeout: float):
+            return {"name": "codex"}
+
+        def refresh_rows(payload):
+            return [("5h limit", 57.0)]
+
+        def render(payload, tzinfo, *, font_path=None):
+            return "image:codex"
+
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
+            push_calls.append((source_name, image, prev_black, prev_red))
+            return True, (b"new-black", b"new-red")
+
+        async def sleep(_: float):
+            return None
+
+        source = UsageLoopSource(
+            name="codex",
+            timeout=9.0,
+            fetch=fetch,
+            refresh_rows=refresh_rows,
+            bar_inner_width=100,
+            render=render,
+        )
+        prev_layer_bytes = {"codex": (b"old-black", b"old-red")}
+        push_counts = {"codex": 2}
+        refresh_states = {
+            "codex": _build_refresh_state(
+                source_name="codex",
+                screen_name="2.9inch",
+                rows=[("5h limit", 54.8)],
+                bar_inner_width=100,
+            )
+        }
+
+        asyncio.run(
+            _run_loop_cycle(
+                sources=[source],
+                screen_name="2.9inch",
+                tzinfo=ZoneInfo("UTC"),
+                font_path=None,
+                push_image=push_image,
+                interval_seconds=10,
+                sleep=sleep,
+                refresh_states=refresh_states,
+                prev_layer_bytes=prev_layer_bytes,
+                push_counts=push_counts,
+                full_refresh_every=5,
+                supports_partial_diff=False,
+            )
+        )
+
+        self.assertEqual(
+            push_calls,
+            [("codex", "image:codex", None, None)],
+        )
+        self.assertEqual(prev_layer_bytes["codex"], (b"new-black", b"new-red"))
+        self.assertEqual(push_counts["codex"], 0)
+
     def test_run_loop_cycle_continues_after_source_failure(self) -> None:
         events: list[tuple[str, object]] = []
 

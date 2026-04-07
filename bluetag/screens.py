@@ -25,6 +25,8 @@ class ScreenProfile:
     flush_every: int = 0
     settle_ms: int = 0
     encoding: str = "row"
+    initial_repeat_packets: int = 1
+    supports_partial_diff: bool = True
 
     @property
     def size(self) -> tuple[int, int]:
@@ -63,6 +65,8 @@ SCREEN_PROFILES: dict[str, ScreenProfile] = {
         flush_every=0,
         settle_ms=1500,
         encoding="row",
+        initial_repeat_packets=1,
+        supports_partial_diff=True,
     ),
     "2.9inch": ScreenProfile(
         name="2.9inch",
@@ -72,7 +76,7 @@ SCREEN_PROFILES: dict[str, ScreenProfile] = {
         device_prefix="EDP-",
         cache_file=".device.2.9inch",
         transport="layer",
-        default_interval_ms=100,
+        default_interval_ms=70,
         mirror=True,
         rotate=90,
         swap_wh=True,
@@ -80,6 +84,8 @@ SCREEN_PROFILES: dict[str, ScreenProfile] = {
         flush_every=0,
         settle_ms=1500,
         encoding="row",
+        initial_repeat_packets=4,
+        supports_partial_diff=False,
     ),
 }
 

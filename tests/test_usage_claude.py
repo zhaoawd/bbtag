@@ -17,6 +17,18 @@ from bluetag.usage_claude import (
 )
 
 
+def _black_bbox(image):
+    pixels = image.convert("1")
+    xs: list[int] = []
+    ys: list[int] = []
+    for y in range(pixels.height):
+        for x in range(pixels.width):
+            if pixels.getpixel((x, y)) == 0:
+                xs.append(x)
+                ys.append(y)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
 class ClaudeUsageTests(unittest.TestCase):
     def test_build_rows_omits_sonnet_on_small_screen(self) -> None:
         payload = {
@@ -136,6 +148,21 @@ class ClaudeUsageTests(unittest.TestCase):
         self.assertEqual(small.size, (250, 122))
         self.assertEqual(medium.size, (296, 128))
         self.assertEqual(large.size, (416, 240))
+
+    def test_render_claude_2_9_keeps_footer_and_right_edge_safe(self) -> None:
+        payload = {
+            "five_hour": {"utilization": 100.0, "resets_at": "2026-04-08T09:40:00Z"},
+            "seven_day": {"utilization": 61.0, "resets_at": "2026-04-08T15:00:00Z"},
+            "seven_day_sonnet": {
+                "utilization": 8.5,
+                "resets_at": "2026-04-07T00:00:00Z",
+            },
+        }
+
+        image = render_claude_2_9(payload, ZoneInfo("Asia/Shanghai"))
+        _min_x, _min_y, max_x, max_y = _black_bbox(image)
+        self.assertLessEqual(max_x, 283)
+        self.assertLessEqual(max_y, 123)
 
     def test_build_claude_refresh_rows(self) -> None:
         payload = {

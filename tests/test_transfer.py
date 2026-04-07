@@ -44,6 +44,36 @@ class _FakeSession:
 
 
 class TransferTests(unittest.IsolatedAsyncioTestCase):
+    async def test_send_layer_repeats_first_four_packets_when_configured(self) -> None:
+        session = _FakeSession()
+
+        async def fake_sleep(_: float) -> None:
+            pass
+
+        data = bytes(range(160))
+        with patch("bluetag.transfer.asyncio.sleep", fake_sleep):
+            ok = await _send_layer(
+                session,
+                data,
+                layer_type=0x13,
+                layer_name="黑层",
+                delay_ms=0,
+                flush_every=0,
+                on_progress=None,
+                initial_repeat_packets=4,
+            )
+
+        self.assertTrue(ok)
+        start = bytes([0x13, 0, 0, 0, 0])
+        end = bytes([0x13, 0xFF, 0xFF, 0xFF, 0xFF])
+        data_writes = [w for w in session.writes if w not in (start, end)]
+        self.assertEqual(len(data_writes), 14)
+        self.assertEqual(data_writes[0], data_writes[1])
+        self.assertEqual(data_writes[2], data_writes[3])
+        self.assertEqual(data_writes[4], data_writes[5])
+        self.assertEqual(data_writes[6], data_writes[7])
+        self.assertNotEqual(data_writes[7], data_writes[8])
+
     async def test_send_layer_skips_all_when_data_identical(self) -> None:
         session = _FakeSession()
 

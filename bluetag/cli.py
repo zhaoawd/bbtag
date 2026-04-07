@@ -233,6 +233,7 @@ async def _push_layer_image(
             delay_ms=interval_ms,
             settle_ms=profile.settle_ms,
             flush_every=profile.flush_every,
+            initial_repeat_packets=profile.initial_repeat_packets,
             on_progress=_layer_progress,
             prev_black_data=prev_black_data,
             prev_red_data=prev_red_data,
@@ -407,6 +408,7 @@ async def _run_loop_cycle(
     prev_layer_bytes: dict[str, tuple[bytes, bytes]] | None = None,
     push_counts: dict[str, int] | None = None,
     full_refresh_every: int = 5,
+    supports_partial_diff: bool = True,
 ) -> dict[str, UsageRefreshState]:
     states = {} if refresh_states is None else dict(refresh_states)
     layer_bytes = {} if prev_layer_bytes is None else prev_layer_bytes
@@ -435,7 +437,7 @@ async def _run_loop_cycle(
 
         try:
             image = source.render(payload, tzinfo, font_path=font_path)
-            force_full = (
+            force_full = not supports_partial_diff or (
                 full_refresh_every > 0
                 and partial_counts.get(source.name, 0) >= full_refresh_every
             )
@@ -597,6 +599,7 @@ def cmd_loop(args):
     profile = _resolve_profile(args.screen)
     tzinfo = _resolve_timezone(args.timezone)
     sources = _build_loop_sources(profile.name)
+    supports_partial_diff = profile.supports_partial_diff
 
     async def _loop():
         target = await _find_target(args, profile)
@@ -651,6 +654,7 @@ def cmd_loop(args):
                 prev_layer_bytes=prev_layer_bytes,
                 push_counts=push_counts,
                 full_refresh_every=args.full_refresh_every,
+                supports_partial_diff=supports_partial_diff,
             )
 
     try:

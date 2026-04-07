@@ -454,32 +454,45 @@ def _render_rows_small(
     font_path: str | None,
     width: int = WIDTH_2_13,
     height: int = HEIGHT_2_13,
+    title_font_size: int = 13,
+    label_font_size: int = 12,
+    stat_font_size: int = 12,
+    detail_font_size: int = 9,
+    left_pad: int = 7,
+    right_pad: int = 7,
+    top_pad: int = 5,
+    bottom_pad: int = 3,
+    title_gap: int = 5,
+    gap: int = 9,
+    bar_height: int = 12,
+    bar_gap: int = 3,
+    detail_gap: int = 16,
+    row_tops: list[int] | None = None,
 ) -> Image.Image:
     image, draw = _new_crisp_canvas(width, height)
 
-    title_font = _load_font(13, font_path=font_path)
-    label_font = _load_font(12, font_path=font_path)
-    stat_font = _load_font(12, font_path=font_path)
-    detail_font = _load_font(9, font_path=font_path)
-
-    left_pad = 7
-    right_pad = 7
-    top_pad = 3
-    bottom_pad = 4
-    title_gap = 6
-    gap = 9
+    title_font = _load_font(title_font_size, font_path=font_path)
+    label_font = _load_font(label_font_size, font_path=font_path)
+    stat_font = _load_font(stat_font_size, font_path=font_path)
+    detail_font = _load_font(detail_font_size, font_path=font_path)
 
     title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
     title_w = title_bbox[2] - title_bbox[0]
     title_h = title_bbox[3] - title_bbox[1]
-    draw.text(((width - title_w) // 2, top_pad), title_text, fill=0, font=title_font)
 
-    rows_top = top_pad + title_h + title_gap
+    # 标题放在渲染图底部（变换后显示在物理屏幕顶部）
+    title_y = height - bottom_pad - title_h
+    draw.text(((width - title_w) // 2, title_y), title_text, fill=0, font=title_font)
+
+    rows_top = top_pad
     row_count = max(1, len(rows))
-    row_height = (height - rows_top - bottom_pad - gap * (row_count - 1)) // row_count
+    row_height = (title_y - title_gap - rows_top - gap * (row_count - 1)) // row_count
 
     for index, row in enumerate(rows):
-        row_top = rows_top + index * (row_height + gap)
+        if row_tops is not None and index < len(row_tops):
+            row_top = row_tops[index]
+        else:
+            row_top = rows_top + index * (row_height + gap)
         percent_text = f"{int(round(row.left_percent))}% left"
 
         label_bbox = draw.textbbox((0, 0), row.label, font=label_font)
@@ -495,20 +508,20 @@ def _render_rows_small(
             font=stat_font,
         )
 
-        bar_y = row_top + label_h + 3
+        bar_y = row_top + label_h + bar_gap
         _draw_progress_bar(
             draw,
             x=left_pad,
             y=bar_y,
             width=width - left_pad - right_pad - 1,
-            height=12,
+            height=bar_height,
             percent=row.left_percent,
         )
 
         detail_bbox = draw.textbbox((0, 0), row.resets_text, font=detail_font)
         detail_w = detail_bbox[2] - detail_bbox[0]
         draw.text(
-            (width - right_pad - detail_w, bar_y + 16),
+            (width - right_pad - detail_w, bar_y + detail_gap),
             row.resets_text,
             fill=0,
             font=detail_font,
@@ -619,6 +632,20 @@ def render_codex_2_9(payload: dict[str, Any], tzinfo, font_path: str | None = No
         font_path=font_path,
         width=WIDTH_2_9,
         height=HEIGHT_2_9,
+        title_font_size=13,
+        label_font_size=13,
+        stat_font_size=13,
+        detail_font_size=12,
+        left_pad=8,
+        right_pad=13,
+        top_pad=5,
+        bottom_pad=14,
+        title_gap=3,
+        gap=4,
+        bar_height=11,
+        bar_gap=5,
+        detail_gap=14,
+        row_tops=[4, 50],
     )
 
 

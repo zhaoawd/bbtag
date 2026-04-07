@@ -33,6 +33,7 @@ async def _send_layer(
     flush_every: int,
     on_progress: ProgressCallback | None,
     prev_data: bytes | None = None,
+    initial_repeat_packets: int = 1,
 ) -> bool:
     try:
         await session.write(bytes([layer_type]) + START_PACKET, response=False)
@@ -42,7 +43,6 @@ async def _send_layer(
         total_packets = (len(data) + chunk_size - 1) // chunk_size
         await asyncio.sleep(1.0)
 
-        first_packet_sent = False
         writes_since_flush = 1
 
         packet_index = 1
@@ -58,10 +58,9 @@ async def _send_layer(
             packet = bytes([layer_type, packet_index & 0xFF, chunk_len]) + chunk
 
             await session.write(packet, response=False)
-            if not first_packet_sent:
+            if packet_index <= initial_repeat_packets:
                 await asyncio.sleep(delay_ms / 1000.0)
                 await session.write(packet, response=False)
-                first_packet_sent = True
 
             await asyncio.sleep(delay_ms / 1000.0)
             writes_since_flush += 1
@@ -96,6 +95,7 @@ async def send_bicolor_image(
     on_progress: ProgressCallback | None = None,
     prev_black_data: bytes | None = None,
     prev_red_data: bytes | None = None,
+    initial_repeat_packets: int = 1,
 ) -> bool:
     """Send black and red layers using the small-screen legacy format."""
     if not await _send_layer(
@@ -107,6 +107,7 @@ async def send_bicolor_image(
         flush_every=flush_every,
         on_progress=on_progress,
         prev_data=prev_black_data,
+        initial_repeat_packets=initial_repeat_packets,
     ):
         return False
 
@@ -121,6 +122,7 @@ async def send_bicolor_image(
         flush_every=flush_every,
         on_progress=on_progress,
         prev_data=prev_red_data,
+        initial_repeat_packets=initial_repeat_packets,
     ):
         return False
 
