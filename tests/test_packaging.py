@@ -20,6 +20,11 @@ class PackagingTests(unittest.TestCase):
 
         self.assertIn("uv tool install .", readme)
         self.assertIn("uv tool run --from . bluetag scan", readme)
+        self.assertIn("### scan 子命令参数", readme)
+        self.assertIn("### push 子命令参数", readme)
+        self.assertIn("### text 子命令参数", readme)
+        self.assertIn("### loop 子命令参数", readme)
+        self.assertIn("### decode 子命令参数", readme)
 
     def test_pyproject_exposes_console_script_without_numpy_dependency(self) -> None:
         data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))

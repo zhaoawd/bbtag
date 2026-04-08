@@ -114,7 +114,40 @@ uv run bluetag push photo.png --screen 2.13inch -d EDP-F3F4F5F6
 
 # 调整发送速度 (ms/包, 默认按屏幕选择)
 uv run bluetag push photo.png -i 80
+
+# 从 btsnoop 抓包日志解码图片
+uv run bluetag decode capture.log -o decoded.png
 ```
+
+### 子命令一览
+
+| 子命令 | 说明 |
+|------|------|
+| `scan` | 扫描附近设备，可按屏幕类型过滤 |
+| `push` | 推送图片到电子墨水屏 |
+| `text` | 渲染文本并推送到电子墨水屏 |
+| `loop` | 交替刷新 Codex / Claude Code usage 面板 |
+| `decode` | 从抓包日志解码图片，便于协议调试 |
+
+### scan 子命令参数
+
+| 参数 | 说明 |
+|------|------|
+| `--timeout, -t` | 扫描超时秒数，默认 `5.0` |
+| `--debug-raw` | 打印过滤前的原始 BLE 发现结果 |
+| `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` / `2.9inch` |
+
+`scan` 会按 `--screen` 对应的设备名前缀过滤扫描结果。默认扫描 `3.7inch` 对应的 `EPD-*` 设备。
+
+### push 子命令参数
+
+| 参数 | 说明 |
+|------|------|
+| `image` (位置参数) | 图片文件路径 |
+| `--device, -d` | 设备名 |
+| `--address, -a` | 设备 BLE 地址 |
+| `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` / `2.9inch` |
+| `--interval, -i` | 包间隔毫秒数；默认按屏幕选择 |
 
 ### text 子命令参数
 
@@ -128,7 +161,10 @@ uv run bluetag push photo.png -i 80
 | `--align` | 正文对齐: left / center |
 | `--font` | 自定义字体路径 |
 | `--preview-only` | 仅生成预览图，不推送 |
+| `--device, -d` | 设备名 |
+| `--address, -a` | 设备 BLE 地址 |
 | `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` / `2.9inch` |
+| `--interval, -i` | 包间隔毫秒数；默认按屏幕选择 |
 
 文字排版会根据 `--screen` 自动切换画布尺寸和字号策略。标题尽量大 (最多 2 行)，正文自动缩小直到全部放得下。
 
@@ -140,6 +176,7 @@ uv run bluetag push photo.png -i 80
 | `--interval` | 刷新间隔秒数，默认 `90` |
 | `--device, -d` | 设备名 |
 | `--address, -a` | 设备 BLE 地址 |
+| `--full-refresh-every` | 每 N 次局部刷新后强制全刷一次，默认 `5`，`0` 表示禁用 |
 | `--timezone` | 时区，例如 `Asia/Shanghai` |
 | `--font` | 自定义字体路径 |
 
@@ -150,6 +187,13 @@ uv run bluetag push photo.png -i 80
 Claude Code usage 会优先使用 Keychain 中的 `accessToken` 请求；如果返回 `token_expired`，会自动使用 `refreshToken` 换取新 token 后重试一次。
 
 `2.9inch` 当前的 BLE 协议参数是参照 `2.13inch` 设置的，已经补了渲染与 loop 支持，但 `device_prefix`、`encoding`、`settle_ms` 等仍建议按实机表现继续校正。
+
+### decode 子命令参数
+
+| 参数 | 说明 |
+|------|------|
+| `log` (位置参数) | `btsnoop` HCI 日志文件 |
+| `--output, -o` | 输出图片路径 |
 
 ## Python API
 
