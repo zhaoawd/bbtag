@@ -17,14 +17,25 @@ CLI 会按 `--screen` 自动切换发送协议，并分别缓存到 `.device.3.7
 # macOS: brew install lzo
 # Linux: sudo apt install liblzo2-dev
 
-# 安装
+# 克隆仓库
 git clone <your-repo-url> && cd bbtag
 
+# 开发环境安装
 # macOS (Homebrew): python-lzo 需要显式指向 Homebrew 的 lzo 头文件
 LZO_DIR="$(brew --prefix lzo)" uv sync
 
 # Linux
 uv sync
+
+# 安装成 uv tool
+# macOS
+LZO_DIR="$(brew --prefix lzo)" uv tool install .
+
+# Linux
+uv tool install .
+
+# 不安装，直接以 tool 方式试跑本地项目
+uv tool run --from . bluetag scan
 ```
 
 如果 macOS 上看到 `fatal error: 'lzo/lzo1.h' file not found`，说明 `python-lzo`
@@ -35,6 +46,9 @@ uv sync
 ## CLI
 
 ```bash
+# 如果已经通过 uv tool install . 安装，可直接运行
+bluetag scan
+
 # 扫描设备
 uv run bluetag scan
 
