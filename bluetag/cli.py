@@ -474,22 +474,31 @@ def cmd_scan(args):
     from bluetag.ble import scan
 
     profile = _resolve_profile(args.screen)
+    retries = args.retries
 
     async def _scan():
-        print(f"扫描蓝签设备 ({profile.name}, {args.timeout}s)...")
-        devices = await scan(
-            timeout=args.timeout,
-            prefixes=(profile.device_prefix,),
-            debug_raw=args.debug_raw,
-        )
-        if not devices:
+        all_devices: list[dict] = []
+        for attempt in range(retries):
+            if attempt == 0:
+                print(f"扫描蓝签设备 ({profile.name}, {args.timeout}s)...")
+            else:
+                print(f"  未发现，重试 ({attempt + 1}/{retries})...")
+            devices = await scan(
+                timeout=args.timeout,
+                prefixes=(profile.device_prefix,),
+                debug_raw=args.debug_raw,
+            )
+            if devices:
+                all_devices = devices
+                break
+        if not all_devices:
             print("  未发现蓝签设备")
             return
-        for device in devices:
+        for device in all_devices:
             print(
                 f"  📺 {device['name']}  ({device['address']})  RSSI: {device['rssi']}"
             )
-        _save_device(devices[0], profile)
+        _save_device(all_devices[0], profile)
 
     asyncio.run(_scan())
 
@@ -748,6 +757,9 @@ def main():
     scan_p = sub.add_parser("scan", help="扫描附近的蓝签设备")
     scan_p.add_argument(
         "--timeout", "-t", type=float, default=5.0, help="扫描超时 (秒)"
+    )
+    scan_p.add_argument(
+        "--retries", "-r", type=int, default=3, help="扫描重试次数 (默认 3)"
     )
     scan_p.add_argument(
         "--debug-raw",
