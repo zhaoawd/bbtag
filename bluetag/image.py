@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
 
 from bluetag.screens import get_screen_profile
@@ -19,15 +18,12 @@ BPP2_SIZE = PIXELS // 4  # 24960 bytes
 
 # 4色调色板 (RGB) — 按 2bpp 值索引
 # 00=黑 01=白 10=黄 11=红
-PALETTE = np.array(
-    [
-        [0, 0, 0],
-        [255, 255, 255],
-        [255, 255, 0],
-        [255, 0, 0],
-    ],
-    dtype=np.float32,
-)
+PALETTE = [
+    (0, 0, 0),
+    (255, 255, 255),
+    (255, 255, 0),
+    (255, 0, 0),
+]
 
 
 def _ensure_image(source: Image.Image | str | Path) -> Image.Image:
@@ -36,11 +32,23 @@ def _ensure_image(source: Image.Image | str | Path) -> Image.Image:
     return Image.open(source)
 
 
+def _nearest_color(r: int, g: int, b: int) -> int:
+    """返回最近的调色板索引 (0-3)。"""
+    best = 0
+    best_dist = float("inf")
+    for i, (pr, pg, pb) in enumerate(PALETTE):
+        dist = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+        if dist < best_dist:
+            best_dist = dist
+            best = i
+    return best
+
+
 def quantize(
     img: Image.Image,
     flip: bool = True,
     size: tuple[int, int] = (WIDTH, HEIGHT),
-) -> np.ndarray:
+) -> list[int]:
     """
     将图像量化为 4 色索引数组。
 
@@ -50,47 +58,45 @@ def quantize(
         size: 目标尺寸
 
     Returns:
-        np.ndarray shape=(pixels,) dtype=uint8, 值 0-3
+        list[int], 长度=pixels, 值 0-3
     """
     width, height = size
     img = img.convert("RGB").resize((width, height), Image.LANCZOS)
     if flip:
         img = img.transpose(Image.FLIP_LEFT_RIGHT)
-    pixels = np.array(img, dtype=np.float32).reshape(-1, 3)
-    dists = np.linalg.norm(pixels[:, None, :] - PALETTE[None, :, :], axis=2)
-    return dists.argmin(axis=1).astype(np.uint8)
+    pixels = img.getdata()
+    return [_nearest_color(r, g, b) for r, g, b in pixels]
 
 
 def quantize_for_screen(
     img: Image.Image,
     screen: str = "3.7inch",
     flip: bool | None = None,
-) -> np.ndarray:
+) -> list[int]:
     """按屏幕尺寸量化图像。"""
     profile = get_screen_profile(screen)
     effective_flip = profile.mirror if flip is None else flip
     return quantize(img, flip=effective_flip, size=profile.size)
 
 
-def pack_2bpp(indices: np.ndarray) -> bytes:
+def pack_2bpp(indices: list[int] | bytes) -> bytes:
     """
     将 4 色索引数组打包为 2bpp 字节流 (MSB first, 每字节 4 像素)。
 
     Args:
-        indices: shape=(PIXELS,) dtype=uint8, 值 0-3
+        indices: 长度=PIXELS, 值 0-3
 
     Returns:
         bytes, 长度 24960
     """
     assert len(indices) == PIXELS
-    groups = indices.reshape(-1, 4)
-    packed = (
-        (groups[:, 0] << 6) | (groups[:, 1] << 4) | (groups[:, 2] << 2) | groups[:, 3]
-    )
-    return bytes(packed.astype(np.uint8))
+    out = bytearray(PIXELS // 4)
+    for i in range(0, PIXELS, 4):
+        out[i // 4] = (indices[i] << 6) | (indices[i + 1] << 4) | (indices[i + 2] << 2) | indices[i + 3]
+    return bytes(out)
 
 
-def unpack_2bpp(data: bytes) -> np.ndarray:
+def unpack_2bpp(data: bytes) -> list[int]:
     """
     将 2bpp 字节流解包为 4 色索引数组。
 
@@ -98,33 +104,35 @@ def unpack_2bpp(data: bytes) -> np.ndarray:
         data: 24960 bytes
 
     Returns:
-        np.ndarray shape=(PIXELS,) dtype=uint8, 值 0-3
+        list[int], 长度=PIXELS, 值 0-3
     """
-    arr = np.frombuffer(data, dtype=np.uint8)
-    p0 = (arr >> 6) & 3
-    p1 = (arr >> 4) & 3
-    p2 = (arr >> 2) & 3
-    p3 = arr & 3
-    return np.stack([p0, p1, p2, p3], axis=1).flatten()
+    out = []
+    for b in data:
+        out.append((b >> 6) & 3)
+        out.append((b >> 4) & 3)
+        out.append((b >> 2) & 3)
+        out.append(b & 3)
+    return out
 
 
 def indices_to_image(
-    indices: np.ndarray,
+    indices: list[int],
     size: tuple[int, int] = (WIDTH, HEIGHT),
 ) -> Image.Image:
     """
     将 4 色索引数组转为 RGB PIL Image。
 
     Args:
-        indices: shape=(pixels,) dtype=uint8, 值 0-3
+        indices: 长度=pixels, 值 0-3
         size: 输出尺寸
 
     Returns:
         PIL Image
     """
     width, height = size
-    rgb = PALETTE[indices].astype(np.uint8).reshape(height, width, 3)
-    return Image.fromarray(rgb)
+    img = Image.new("RGB", (width, height))
+    img.putdata([PALETTE[i] for i in indices])
+    return img
 
 
 def process_bicolor_image(
@@ -137,12 +145,13 @@ def process_bicolor_image(
     mirror: bool = True,
     swap_wh: bool = False,
     detect_red: bool = True,
-) -> tuple[np.ndarray, np.ndarray, Image.Image]:
+) -> tuple[list[list[int]], list[list[int]], Image.Image]:
     """
     将图像处理为双色电子墨水屏的黑层/红层。
 
     Returns:
         (black_layer, red_layer, preview_image)
+        每层为 height x width 的二维列表，值 0 或 1
     """
     profile = get_screen_profile(screen)
     img = _ensure_image(source).convert("RGB")
@@ -167,28 +176,34 @@ def process_bicolor_image(
     if dither:
         gray = gray.convert("1", dither=Image.Dither.FLOYDSTEINBERG).convert("L")
 
-    img_array = np.array(gray)
-    black_layer = (img_array >= threshold).astype(np.uint8)
-    red_layer = np.zeros_like(black_layer)
+    gray_pixels = list(gray.getdata())
+    black_layer = [[0] * width for _ in range(height)]
+    red_layer = [[0] * width for _ in range(height)]
+
+    for row in range(height):
+        for col in range(width):
+            idx = row * width + col
+            black_layer[row][col] = 1 if gray_pixels[idx] >= threshold else 0
 
     if detect_red:
-        rgb_array = np.array(canvas)
-        is_red = (
-            (rgb_array[:, :, 0] > 150)
-            & (rgb_array[:, :, 1] < 100)
-            & (rgb_array[:, :, 2] < 100)
-        )
-        red_layer = is_red.astype(np.uint8)
-        black_layer = black_layer & (~red_layer)
+        rgb_pixels = list(canvas.getdata())
+        for row in range(height):
+            for col in range(width):
+                idx = row * width + col
+                r, g, b = rgb_pixels[idx]
+                if r > 150 and g < 100 and b < 100:
+                    red_layer[row][col] = 1
+                    black_layer[row][col] = 0
 
     return black_layer, red_layer, bicolor_layers_to_image(black_layer, red_layer)
 
 
-def layer_to_bytes_rowwise(layer: np.ndarray) -> bytes:
+def layer_to_bytes_rowwise(layer: list[list[int]]) -> bytes:
     """Pack a layer row by row, 8 horizontal pixels per byte."""
-    height, width = layer.shape
+    height = len(layer)
+    width = len(layer[0]) if height else 0
     bytes_per_row = (width + 7) // 8
-    data = []
+    data = bytearray()
 
     for row in range(height):
         for byte_idx in range(bytes_per_row):
@@ -196,18 +211,19 @@ def layer_to_bytes_rowwise(layer: np.ndarray) -> bytes:
             byte_val = 0
             for bit_idx in range(8):
                 col = start_col + (7 - bit_idx)
-                if col < width and layer[row, col]:
+                if col < width and layer[row][col]:
                     byte_val |= 1 << bit_idx
             data.append(byte_val)
 
     return bytes(data)
 
 
-def layer_to_bytes_columnwise(layer: np.ndarray) -> bytes:
+def layer_to_bytes_columnwise(layer: list[list[int]]) -> bytes:
     """Pack a layer column by column, 8 vertical pixels per byte."""
-    height, width = layer.shape
+    height = len(layer)
+    width = len(layer[0]) if height else 0
     bytes_per_column = (height + 7) // 8
-    data = []
+    data = bytearray()
 
     for col in range(width):
         for byte_idx in range(bytes_per_column):
@@ -215,14 +231,14 @@ def layer_to_bytes_columnwise(layer: np.ndarray) -> bytes:
             byte_val = 0
             for bit_idx in range(8):
                 row = start_row + bit_idx
-                if row < height and layer[row, col]:
+                if row < height and layer[row][col]:
                     byte_val |= 1 << bit_idx
             data.append(byte_val)
 
     return bytes(data)
 
 
-def layer_to_bytes(layer: np.ndarray, encoding: str = "row") -> bytes:
+def layer_to_bytes(layer: list[list[int]], encoding: str = "row") -> bytes:
     """Convert image layer to transmission bytes."""
     if encoding == "row":
         return layer_to_bytes_rowwise(layer)
@@ -232,12 +248,21 @@ def layer_to_bytes(layer: np.ndarray, encoding: str = "row") -> bytes:
 
 
 def bicolor_layers_to_image(
-    black_layer: np.ndarray,
-    red_layer: np.ndarray,
+    black_layer: list[list[int]],
+    red_layer: list[list[int]],
 ) -> Image.Image:
     """Convert black/red binary layers into an RGB preview image."""
-    height, width = black_layer.shape
-    canvas = np.full((height, width, 3), 255, dtype=np.uint8)
-    canvas[black_layer == 0] = (0, 0, 0)
-    canvas[red_layer == 1] = (255, 0, 0)
-    return Image.fromarray(canvas)
+    height = len(black_layer)
+    width = len(black_layer[0]) if height else 0
+    img = Image.new("RGB", (width, height), "white")
+    pixels = []
+    for row in range(height):
+        for col in range(width):
+            if red_layer[row][col] == 1:
+                pixels.append((255, 0, 0))
+            elif black_layer[row][col] == 0:
+                pixels.append((0, 0, 0))
+            else:
+                pixels.append((255, 255, 255))
+    img.putdata(pixels)
+    return img
