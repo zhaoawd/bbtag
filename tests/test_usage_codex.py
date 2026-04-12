@@ -44,6 +44,16 @@ def _max_blank_row_run(image) -> int:
     return max(longest, current)
 
 
+def _count_rgb_pixels(image, rgb):
+    count = 0
+    converted = image.convert("RGB")
+    for y in range(converted.height):
+        for x in range(converted.width):
+            if converted.getpixel((x, y)) == rgb:
+                count += 1
+    return count
+
+
 class CodexUsageTests(unittest.TestCase):
     def test_build_codex_rows_from_rate_limit_payload(self) -> None:
         payload = {
@@ -139,6 +149,51 @@ class CodexUsageTests(unittest.TestCase):
         self.assertLessEqual(max_y, 123)
         self.assertLessEqual(_max_blank_row_run(image), 70)
 
+    def test_render_codex_images_use_red_for_high_usage(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 82.0,
+                    "limit_window_seconds": 18_000,
+                    "reset_at": 1_775_242_400,
+                },
+                "secondary_window": {
+                    "used_percent": 88.0,
+                    "limit_window_seconds": 604_800,
+                    "reset_at": 1_775_520_000,
+                },
+            }
+        }
+
+        for image in (
+            render_codex_2_13(payload, ZoneInfo("UTC")),
+            render_codex_2_9(payload, ZoneInfo("UTC")),
+            render_codex_3_7(payload, ZoneInfo("UTC")),
+        ):
+            self.assertGreater(_count_rgb_pixels(image, (255, 0, 0)), 0)
+
+    def test_render_codex_images_keep_low_usage_black_only(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 45.2,
+                    "limit_window_seconds": 18_000,
+                    "reset_at": 1_775_242_400,
+                },
+                "secondary_window": {
+                    "used_percent": 12.0,
+                    "limit_window_seconds": 604_800,
+                    "reset_at": 1_775_520_000,
+                },
+            }
+        }
+
+        for image in (
+            render_codex_2_13(payload, ZoneInfo("UTC")),
+            render_codex_2_9(payload, ZoneInfo("UTC")),
+            render_codex_3_7(payload, ZoneInfo("UTC")),
+        ):
+            self.assertEqual(_count_rgb_pixels(image, (255, 0, 0)), 0)
 
     def test_build_codex_refresh_rows(self) -> None:
         payload = {
