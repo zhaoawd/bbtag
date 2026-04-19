@@ -39,6 +39,13 @@ _FONT_SEARCH = [
     "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
     "C:\\Windows\\Fonts\\consola.ttf",
 ]
+_MONO_FONT_SEARCH = [
+    "/System/Library/Fonts/Supplemental/Menlo.ttc",
+    "/System/Library/Fonts/Monaco.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+    "C:\\Windows\\Fonts\\consola.ttf",
+]
 
 
 class CodexUsageError(RuntimeError):
@@ -55,6 +62,7 @@ class CodexCredentials:
 class UsageRow:
     label: str
     left_percent: float
+    used_percent: float
     resets_text: str
 
 
@@ -315,14 +323,14 @@ def format_window_label(window_minutes: Any, fallback: str) -> str:
     if not isinstance(window_minutes, int) or window_minutes <= 0:
         return fallback
     if window_minutes == 300:
-        return "5h limit"
+        return "5h"
     if window_minutes == 10080:
-        return "weekly limit"
+        return "7d"
     if window_minutes % 1440 == 0:
-        return f"{window_minutes // 1440}d limit"
+        return f"{window_minutes // 1440}d"
     if window_minutes % 60 == 0:
-        return f"{window_minutes // 60}h limit"
-    return f"{window_minutes}m limit"
+        return f"{window_minutes // 60}h"
+    return f"{window_minutes}m"
 
 
 def format_reset_text(resets_at: Any, tzinfo) -> str:
@@ -382,8 +390,6 @@ def _compact_window_label(label: str) -> str:
     normalized = label.strip().lower()
     if normalized.startswith("5h"):
         return "5h"
-    if "week" in normalized:
-        return "wk"
     if normalized.startswith("7d"):
         return "7d"
     return label
@@ -394,10 +400,11 @@ def build_codex_rows(payload: dict[str, Any], tzinfo) -> list[UsageRow]:
 
     rows = [
         UsageRow(
-            label=format_window_label(primary.get("window_minutes"), "5h limit"),
+            label=format_window_label(primary.get("window_minutes"), "5h"),
             left_percent=max(
                 0.0, min(100.0, 100.0 - parse_used_percent(primary.get("used_percent")))
             ),
+            used_percent=parse_used_percent(primary.get("used_percent")),
             resets_text=format_reset_text(primary.get("resets_at"), tzinfo),
         )
     ]
@@ -405,9 +412,7 @@ def build_codex_rows(payload: dict[str, Any], tzinfo) -> list[UsageRow]:
     if secondary:
         rows.append(
             UsageRow(
-                label=format_window_label(
-                    secondary.get("window_minutes"), "weekly limit"
-                ),
+                label=format_window_label(secondary.get("window_minutes"), "7d"),
                 left_percent=max(
                     0.0,
                     min(
@@ -415,6 +420,7 @@ def build_codex_rows(payload: dict[str, Any], tzinfo) -> list[UsageRow]:
                         100.0 - parse_used_percent(secondary.get("used_percent")),
                     ),
                 ),
+                used_percent=parse_used_percent(secondary.get("used_percent")),
                 resets_text=format_reset_text(secondary.get("resets_at"), tzinfo),
             )
         )
@@ -427,26 +433,16 @@ def build_codex_refresh_rows(payload: dict[str, Any]) -> list[tuple[str, float]]
 
     rows = [
         (
-            format_window_label(primary.get("window_minutes"), "5h limit"),
-            max(
-                0.0,
-                min(100.0, 100.0 - parse_used_percent(primary.get("used_percent"))),
-            ),
+            format_window_label(primary.get("window_minutes"), "5h"),
+            parse_used_percent(primary.get("used_percent")),
         )
     ]
 
     if secondary:
         rows.append(
             (
-                format_window_label(secondary.get("window_minutes"), "weekly limit"),
-                max(
-                    0.0,
-                    min(
-                        100.0,
-                        100.0
-                        - parse_used_percent(secondary.get("used_percent")),
-                    ),
-                ),
+                format_window_label(secondary.get("window_minutes"), "7d"),
+                parse_used_percent(secondary.get("used_percent")),
             )
         )
 
@@ -457,13 +453,13 @@ def build_codex_panel_rows(payload: dict[str, Any], tzinfo) -> list[PanelRow]:
     primary, secondary = extract_rate_limits(payload)
 
     row_specs: list[tuple[dict[str, Any], str]] = [
-        (primary, format_window_label(primary.get("window_minutes"), "5h limit"))
+        (primary, format_window_label(primary.get("window_minutes"), "5h"))
     ]
     if secondary:
         row_specs.append(
             (
                 secondary,
-                format_window_label(secondary.get("window_minutes"), "weekly limit"),
+                format_window_label(secondary.get("window_minutes"), "7d"),
             )
         )
 
@@ -476,11 +472,7 @@ def build_codex_panel_rows(payload: dict[str, Any], tzinfo) -> list[PanelRow]:
                 label=compact_label,
                 left_percent=max(0.0, min(100.0, 100.0 - used_percent)),
                 used_percent=used_percent,
-                remaining_text=(
-                    _format_remaining_text(window.get("resets_at"), tzinfo)
-                    if compact_label == "5h"
-                    else _format_reset_point_text(window.get("resets_at"), tzinfo)
-                ),
+                remaining_text=_format_reset_point_text(window.get("resets_at"), tzinfo),
             )
         )
     return rows
@@ -497,6 +489,19 @@ def _load_font(size: int, *, font_path: str | None = None) -> ImageFont.FreeType
     return ImageFont.load_default()
 
 
+def _load_mono_font(
+    size: int, *, font_path: str | None = None
+) -> ImageFont.FreeTypeFont:
+    if font_path:
+        return ImageFont.truetype(font_path, size)
+    for path in _MONO_FONT_SEARCH:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return _load_font(size, font_path=font_path)
+
+
 def _new_crisp_canvas(
     width: int,
     height: int,
@@ -505,6 +510,52 @@ def _new_crisp_canvas(
     draw = ImageDraw.Draw(image)
     draw.fontmode = "1"
     return image, draw
+
+
+def _draw_hardened_text(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+) -> None:
+    x, y = position
+    draw.text((x, y), text, fill=0, font=font)
+    draw.text((x + 1, y), text, fill=0, font=font)
+
+
+def _measure_tracked_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+    tracking: int,
+) -> int:
+    total_width = 0
+    for index, char in enumerate(text):
+        char_bbox = draw.textbbox((0, 0), char, font=font)
+        total_width += char_bbox[2] - char_bbox[0]
+        if index < len(text) - 1:
+            total_width += tracking
+    return total_width
+
+
+def _draw_tracked_text(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+    tracking: int,
+) -> None:
+    x, y = position
+    cursor_x = x
+    for index, char in enumerate(text):
+        draw.text((cursor_x, y), text=char, fill=0, font=font)
+        char_bbox = draw.textbbox((0, 0), char, font=font)
+        cursor_x += char_bbox[2] - char_bbox[0]
+        if index < len(text) - 1:
+            cursor_x += tracking
 
 
 def _draw_progress_bar(
@@ -557,8 +608,8 @@ def _render_rows_small(
 
     title_font = _load_font(title_font_size, font_path=font_path)
     label_font = _load_font(label_font_size, font_path=font_path)
-    stat_font = _load_font(stat_font_size, font_path=font_path)
-    detail_font = _load_font(detail_font_size, font_path=font_path)
+    stat_font = _load_mono_font(stat_font_size, font_path=font_path)
+    detail_font = _load_mono_font(detail_font_size, font_path=font_path)
 
     title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
     title_w = title_bbox[2] - title_bbox[0]
@@ -577,19 +628,24 @@ def _render_rows_small(
             row_top = row_tops[index]
         else:
             row_top = rows_top + index * (row_height + gap)
-        percent_text = f"{int(round(row.left_percent))}% left"
+        percent_text = f"{int(round(row.used_percent))}%"
 
         label_bbox = draw.textbbox((0, 0), row.label, font=label_font)
-        percent_bbox = draw.textbbox((0, 0), percent_text, font=stat_font)
         label_h = label_bbox[3] - label_bbox[1]
-        percent_w = percent_bbox[2] - percent_bbox[0]
+        percent_w = _measure_tracked_text(
+            draw,
+            percent_text,
+            font=stat_font,
+            tracking=1,
+        )
 
         draw.text((left_pad, row_top), row.label, fill=0, font=label_font)
-        draw.text(
+        _draw_tracked_text(
+            draw,
             (width - right_pad - percent_w, row_top),
             percent_text,
-            fill=0,
             font=stat_font,
+            tracking=1,
         )
 
         bar_y = row_top + label_h + bar_gap
@@ -599,15 +655,15 @@ def _render_rows_small(
             y=bar_y,
             width=width - left_pad - right_pad - 1,
             height=bar_height,
-            percent=row.left_percent,
+            percent=row.used_percent,
         )
 
         detail_bbox = draw.textbbox((0, 0), row.resets_text, font=detail_font)
         detail_w = detail_bbox[2] - detail_bbox[0]
-        draw.text(
+        _draw_hardened_text(
+            draw,
             (width - right_pad - detail_w, bar_y + detail_gap),
             row.resets_text,
-            fill=0,
             font=detail_font,
         )
 
@@ -653,7 +709,7 @@ def _render_rows_large(
 
     for index, row in enumerate(rows):
         row_top = rows_top + index * (row_height + gap)
-        percent_text = f"{int(round(row.left_percent))}% left"
+        percent_text = f"{int(round(row.used_percent))}%"
 
         label_bbox = draw.textbbox((0, 0), row.label, font=label_font)
         percent_bbox = draw.textbbox((0, 0), percent_text, font=stat_font)
@@ -680,7 +736,7 @@ def _render_rows_large(
         inner_y1 = bar_y + 18
         fill_width = round(
             max(0, inner_x1 - inner_x0)
-            * max(0.0, min(100.0, row.left_percent))
+            * max(0.0, min(100.0, row.used_percent))
             / 100.0
         )
         if fill_width > 0:

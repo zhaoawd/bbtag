@@ -49,11 +49,11 @@ class ClaudeUsageTests(unittest.TestCase):
 
         self.assertEqual(
             [row.label for row in compact_rows],
-            ["5h session", "7d all models"],
+            ["5h", "7d"],
         )
         self.assertEqual(
             [row.label for row in full_rows],
-            ["5h session", "7d all models", "sonnet"],
+            ["5h", "7d", "sonnet"],
         )
         self.assertAlmostEqual(compact_rows[0].left_percent, 54.8)
 
@@ -275,7 +275,7 @@ class ClaudeUsageTests(unittest.TestCase):
 
         self.assertEqual([row.label for row in rows], ["5h", "7d"])
         self.assertAlmostEqual(rows[0].used_percent, 94.0)
-        self.assertTrue(rows[0].remaining_text.endswith("m"))
+        self.assertIn(":", rows[0].remaining_text)
         self.assertIn("/", rows[1].remaining_text)
         self.assertIn(":", rows[1].remaining_text)
 
@@ -307,10 +307,10 @@ class ClaudeUsageTests(unittest.TestCase):
         compact = build_claude_refresh_rows(payload, include_sonnet=False)
         full = build_claude_refresh_rows(payload, include_sonnet=True)
 
-        self.assertEqual(compact, [("5h session", 54.8), ("7d all models", 88.0)])
+        self.assertEqual(compact, [("5h", 45.2), ("7d", 12.0)])
         self.assertEqual(
             full,
-            [("5h session", 54.8), ("7d all models", 88.0), ("sonnet", 91.5)],
+            [("5h", 45.2), ("7d", 12.0), ("sonnet", 8.5)],
         )
 
 

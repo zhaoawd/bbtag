@@ -103,6 +103,40 @@ def _draw_hardened_text(
     draw.text((x + 1, y), text, fill="black", font=font)
 
 
+def _measure_tracked_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+    tracking: int,
+) -> int:
+    total_width = 0
+    for index, char in enumerate(text):
+        char_bbox = draw.textbbox((0, 0), char, font=font)
+        total_width += char_bbox[2] - char_bbox[0]
+        if index < len(text) - 1:
+            total_width += tracking
+    return total_width
+
+
+def _draw_tracked_text(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+    tracking: int,
+) -> None:
+    x, y = position
+    cursor_x = x
+    for index, char in enumerate(text):
+        draw.text((cursor_x, y), char, fill="black", font=font)
+        char_bbox = draw.textbbox((0, 0), char, font=font)
+        cursor_x += char_bbox[2] - char_bbox[0]
+        if index < len(text) - 1:
+            cursor_x += tracking
+
+
 def _format_timestamp(tzinfo) -> str:
     now_dt = datetime.now(tzinfo)
     hour_text = now_dt.strftime("%I").lstrip("0") or "0"
@@ -149,8 +183,8 @@ def _draw_progress_row(
     left = 14
     label_x = left
     bar_x = 46
-    percent_right = 312
-    time_right = 404
+    percent_right = 311
+    time_right = 403
     bar_y = y + 1
     bar_x1 = bar_x + PANEL_BAR_WIDTH - 1
     bar_y1 = bar_y + PANEL_BAR_HEIGHT - 1
@@ -171,7 +205,7 @@ def _draw_progress_row(
     )
 
     fill_width = round(
-        PANEL_BAR_INNER_WIDTH * max(0.0, min(100.0, row.left_percent)) / 100.0
+        PANEL_BAR_INNER_WIDTH * max(0.0, min(100.0, row.used_percent)) / 100.0
     )
     if fill_width > 0:
         draw.rectangle(
@@ -185,13 +219,18 @@ def _draw_progress_row(
         )
 
     percent_text = f"{int(round(row.used_percent))}%"
-    percent_bbox = draw.textbbox((0, 0), percent_text, font=value_font)
-    percent_w = percent_bbox[2] - percent_bbox[0]
-    _draw_hardened_text(
+    percent_w = _measure_tracked_text(
+        draw,
+        percent_text,
+        font=value_font,
+        tracking=1,
+    )
+    _draw_tracked_text(
         draw,
         (percent_right - percent_w, y),
         percent_text,
         font=value_font,
+        tracking=1,
     )
 
     detail_bbox = draw.textbbox((0, 0), row.remaining_text, font=detail_font)
@@ -202,6 +241,25 @@ def _draw_progress_row(
         fill="black",
         font=detail_font,
     )
+
+
+def _draw_column_headers(
+    draw: ImageDraw.ImageDraw,
+    *,
+    used_right: int,
+    reset_right: int,
+    y: int,
+    font: ImageFont.FreeTypeFont,
+) -> None:
+    used_text = "used"
+    used_bbox = draw.textbbox((0, 0), used_text, font=font)
+    used_w = used_bbox[2] - used_bbox[0]
+    draw.text((used_right - used_w, y), used_text, fill="black", font=font)
+
+    reset_text = "reset"
+    reset_bbox = draw.textbbox((0, 0), reset_text, font=font)
+    reset_w = reset_bbox[2] - reset_bbox[0]
+    draw.text((reset_right - reset_w, y), reset_text, fill="black", font=font)
 
 
 def render_usage_panel_3_7(
@@ -217,11 +275,11 @@ def render_usage_panel_3_7(
 
     title_font = _load_bold_font(18, font_path=font_path)
     time_font = _load_mono_font(14, font_path=font_path)
-    section_font = _load_bold_font(15, font_path=font_path)
-    label_font = _load_bold_font(14, font_path=font_path)
-    value_font = _load_bold_font(13, font_path=font_path)
-    detail_font = _load_bold_font(12, font_path=font_path)
-    column_font = _load_bold_font(11, font_path=font_path)
+    section_font = _load_font(15, font_path=font_path)
+    label_font = _load_font(14, font_path=font_path)
+    value_font = _load_mono_font(14, font_path=font_path)
+    detail_font = _load_mono_font(12, font_path=font_path)
+    column_font = _load_font(13, font_path=font_path)
 
     _draw_hardened_text(draw, (12, 8), title_text, font=title_font)
     timestamp_text = _format_timestamp(tzinfo)
@@ -242,13 +300,19 @@ def render_usage_panel_3_7(
         section_tops = [42, 128]
         row_gap = 28
 
-    _draw_hardened_text(draw, (274, 35), "used", font=column_font)
+    _draw_column_headers(
+        draw,
+        used_right=311,
+        reset_right=403,
+        y=40,
+        font=column_font,
+    )
 
     for index, ((section_title, rows), section_top) in enumerate(
         zip(sections[: len(section_tops)], section_tops)
     ):
         _draw_hardened_text(draw, (12, section_top), section_title, font=section_font)
-        row_y = section_top + 23
+        row_y = section_top + 20
         for row in rows[:2]:
             _draw_progress_row(
                 draw,
@@ -283,10 +347,10 @@ def render_usage_panel_2_9(
 
     title_font = _load_bold_font(12, font_path=font_path)
     time_font = _load_mono_font(9, font_path=font_path)
-    section_font = _load_bold_font(9, font_path=font_path)
-    label_font = _load_bold_font(9, font_path=font_path)
-    value_font = _load_bold_font(8, font_path=font_path)
-    column_font = _load_bold_font(8, font_path=font_path)
+    section_font = _load_font(9, font_path=font_path)
+    label_font = _load_font(9, font_path=font_path)
+    value_font = _load_mono_font(9, font_path=font_path)
+    column_font = _load_font(9, font_path=font_path)
 
     _draw_hardened_text(draw, (8, 5), title_text, font=title_font)
     timestamp_text = _format_timestamp(tzinfo)
@@ -303,17 +367,23 @@ def render_usage_panel_2_9(
     section_tops = [26, 74]
     label_x = 8
     bar_x = 34
-    percent_right = 219
-    time_right = WIDTH_2_9 - 8
+    percent_right = 218
+    time_right = WIDTH_2_9 - 9
     row_gap = 14
 
-    _draw_hardened_text(draw, (188, 21), "used", font=column_font)
+    _draw_column_headers(
+        draw,
+        used_right=218,
+        reset_right=WIDTH_2_9 - 9,
+        y=23,
+        font=column_font,
+    )
 
     for index, ((section_title, rows), section_top) in enumerate(
         zip(sections[: len(section_tops)], section_tops)
     ):
         _draw_hardened_text(draw, (8, section_top), section_title, font=section_font)
-        row_y = section_top + 12
+        row_y = section_top + 11
         for row in rows[:2]:
             _draw_hardened_text(draw, (label_x, row_y), row.label, font=label_font)
 
@@ -334,7 +404,7 @@ def render_usage_panel_2_9(
                 y1=inner_y1,
             )
             fill_width = round(
-                PANEL_BAR_INNER_WIDTH_2_9 * max(0.0, min(100.0, row.left_percent)) / 100.0
+                PANEL_BAR_INNER_WIDTH_2_9 * max(0.0, min(100.0, row.used_percent)) / 100.0
             )
             if fill_width > 0:
                 draw.rectangle(
@@ -348,13 +418,18 @@ def render_usage_panel_2_9(
                 )
 
             percent_text = f"{int(round(row.used_percent))}%"
-            percent_bbox = draw.textbbox((0, 0), percent_text, font=value_font)
-            percent_w = percent_bbox[2] - percent_bbox[0]
-            _draw_hardened_text(
+            percent_w = _measure_tracked_text(
+                draw,
+                percent_text,
+                font=value_font,
+                tracking=1,
+            )
+            _draw_tracked_text(
                 draw,
                 (percent_right - percent_w, row_y),
                 percent_text,
                 font=value_font,
+                tracking=1,
             )
 
             detail_bbox = draw.textbbox((0, 0), row.remaining_text, font=value_font)

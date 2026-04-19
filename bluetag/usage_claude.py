@@ -43,6 +43,13 @@ _FONT_SEARCH = [
     "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
     "C:\\Windows\\Fonts\\consola.ttf",
 ]
+_MONO_FONT_SEARCH = [
+    "/System/Library/Fonts/Supplemental/Menlo.ttc",
+    "/System/Library/Fonts/Monaco.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+    "C:\\Windows\\Fonts\\consola.ttf",
+]
 
 
 class ClaudeUsageError(RuntimeError):
@@ -465,8 +472,8 @@ def build_claude_rows(
     include_sonnet: bool,
 ) -> list[UsageRow]:
     definitions = [
-        ("five_hour", "5h session"),
-        ("seven_day", "7d all models"),
+        ("five_hour", "5h"),
+        ("seven_day", "7d"),
     ]
     if include_sonnet:
         definitions.append(("seven_day_sonnet", "sonnet"))
@@ -494,7 +501,7 @@ def build_claude_refresh_rows(
     include_sonnet: bool,
 ) -> list[tuple[str, float]]:
     return [
-        (row.label, row.left_percent)
+        (row.label, row.used_percent)
         for row in build_claude_rows(payload, timezone.utc, include_sonnet=include_sonnet)
     ]
 
@@ -518,8 +525,8 @@ def build_claude_panel_rows(
     seven_day = payload.get("seven_day")
     seven_day_sonnet = payload.get("seven_day_sonnet")
     reset_map = {
-        "5h session": five_hour.get("resets_at") if isinstance(five_hour, dict) else None,
-        "7d all models": seven_day.get("resets_at") if isinstance(seven_day, dict) else None,
+        "5h": five_hour.get("resets_at") if isinstance(five_hour, dict) else None,
+        "7d": seven_day.get("resets_at") if isinstance(seven_day, dict) else None,
         "sonnet": (
             seven_day_sonnet.get("resets_at")
             if isinstance(seven_day_sonnet, dict)
@@ -532,11 +539,7 @@ def build_claude_panel_rows(
             label=_compact_window_label(row.label),
             left_percent=row.left_percent,
             used_percent=row.used_percent,
-            remaining_text=(
-                _format_remaining_text(reset_map.get(row.label), tzinfo)
-                if _compact_window_label(row.label) == "5h"
-                else _format_reset_point_text(reset_map.get(row.label), tzinfo)
-            ),
+            remaining_text=_format_reset_point_text(reset_map.get(row.label), tzinfo),
         )
         for row in rows
     ]
@@ -553,6 +556,19 @@ def _load_font(size: int, *, font_path: str | None = None) -> ImageFont.FreeType
     return ImageFont.load_default()
 
 
+def _load_mono_font(
+    size: int, *, font_path: str | None = None
+) -> ImageFont.FreeTypeFont:
+    if font_path:
+        return ImageFont.truetype(font_path, size)
+    for path in _MONO_FONT_SEARCH:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return _load_font(size, font_path=font_path)
+
+
 def _new_crisp_canvas(
     width: int,
     height: int,
@@ -561,6 +577,52 @@ def _new_crisp_canvas(
     draw = ImageDraw.Draw(image)
     draw.fontmode = "1"
     return image, draw
+
+
+def _draw_hardened_text(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+) -> None:
+    x, y = position
+    draw.text((x, y), text, fill=0, font=font)
+    draw.text((x + 1, y), text, fill=0, font=font)
+
+
+def _measure_tracked_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+    tracking: int,
+) -> int:
+    total_width = 0
+    for index, char in enumerate(text):
+        char_bbox = draw.textbbox((0, 0), char, font=font)
+        total_width += char_bbox[2] - char_bbox[0]
+        if index < len(text) - 1:
+            total_width += tracking
+    return total_width
+
+
+def _draw_tracked_text(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    *,
+    font: ImageFont.FreeTypeFont,
+    tracking: int,
+) -> None:
+    x, y = position
+    cursor_x = x
+    for index, char in enumerate(text):
+        draw.text((cursor_x, y), text=char, fill=0, font=font)
+        char_bbox = draw.textbbox((0, 0), char, font=font)
+        cursor_x += char_bbox[2] - char_bbox[0]
+        if index < len(text) - 1:
+            cursor_x += tracking
 
 
 def _draw_small_progress_bar(
@@ -613,8 +675,8 @@ def _render_claude_small(
 
     title_font = _load_font(title_font_size, font_path=font_path)
     label_font = _load_font(label_font_size, font_path=font_path)
-    stat_font = _load_font(stat_font_size, font_path=font_path)
-    detail_font = _load_font(detail_font_size, font_path=font_path)
+    stat_font = _load_mono_font(stat_font_size, font_path=font_path)
+    detail_font = _load_mono_font(detail_font_size, font_path=font_path)
 
     title_text = "claude code"
     title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
@@ -640,19 +702,24 @@ def _render_claude_small(
             row_top = row_tops[index]
         else:
             row_top = rows_top + index * (row_height + gap)
-        percent_text = f"{int(round(row.left_percent))}% left"
+        percent_text = f"{int(round(row.used_percent))}%"
 
         label_bbox = draw.textbbox((0, 0), row.label, font=label_font)
-        percent_bbox = draw.textbbox((0, 0), percent_text, font=stat_font)
         label_h = label_bbox[3] - label_bbox[1]
-        percent_w = percent_bbox[2] - percent_bbox[0]
+        percent_w = _measure_tracked_text(
+            draw,
+            percent_text,
+            font=stat_font,
+            tracking=1,
+        )
 
         draw.text((left_pad, row_top), row.label, fill=0, font=label_font)
-        draw.text(
+        _draw_tracked_text(
+            draw,
             (width - right_pad - percent_w, row_top),
             percent_text,
-            fill=0,
             font=stat_font,
+            tracking=1,
         )
 
         bar_y = row_top + label_h + bar_gap
@@ -662,15 +729,15 @@ def _render_claude_small(
             y=bar_y,
             width=width - left_pad - right_pad - 1,
             height=bar_height,
-            percent=row.left_percent,
+            percent=row.used_percent,
         )
 
         detail_bbox = draw.textbbox((0, 0), row.resets_text, font=detail_font)
         detail_w = detail_bbox[2] - detail_bbox[0]
-        draw.text(
+        _draw_hardened_text(
+            draw,
             (width - right_pad - detail_w, bar_y + detail_gap),
             row.resets_text,
-            fill=0,
             font=detail_font,
         )
 

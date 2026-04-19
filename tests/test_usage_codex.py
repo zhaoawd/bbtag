@@ -63,7 +63,7 @@ class CodexUsageTests(unittest.TestCase):
 
         rows = build_codex_rows(payload, ZoneInfo("UTC"))
 
-        self.assertEqual([row.label for row in rows], ["5h limit", "weekly limit"])
+        self.assertEqual([row.label for row in rows], ["5h", "7d"])
         self.assertAlmostEqual(rows[0].left_percent, 54.8)
         self.assertAlmostEqual(rows[1].left_percent, 88.0)
         self.assertTrue(rows[0].resets_text.startswith("resets "))
@@ -111,9 +111,9 @@ class CodexUsageTests(unittest.TestCase):
 
         rows = build_codex_panel_rows(payload, ZoneInfo("UTC"))
 
-        self.assertEqual([row.label for row in rows], ["5h", "wk"])
+        self.assertEqual([row.label for row in rows], ["5h", "7d"])
         self.assertAlmostEqual(rows[0].used_percent, 45.2)
-        self.assertTrue(rows[0].remaining_text.endswith("m"))
+        self.assertIn(":", rows[0].remaining_text)
         self.assertIn("/", rows[1].remaining_text)
         self.assertIn(":", rows[1].remaining_text)
 
@@ -158,7 +158,7 @@ class CodexUsageTests(unittest.TestCase):
 
         rows = build_codex_refresh_rows(payload)
 
-        self.assertEqual(rows, [("5h limit", 54.8), ("weekly limit", 88.0)])
+        self.assertEqual(rows, [("5h", 45.2), ("7d", 12.0)])
 
 
 if __name__ == "__main__":

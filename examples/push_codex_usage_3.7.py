@@ -394,14 +394,14 @@ def format_window_label(window_minutes: Any, fallback: str) -> str:
     if not isinstance(window_minutes, int) or window_minutes <= 0:
         return fallback
     if window_minutes == 300:
-        return "5h limit"
+        return "5h"
     if window_minutes == 10080:
-        return "weekly limit"
+        return "7d"
     if window_minutes % 1440 == 0:
-        return f"{window_minutes // 1440}d limit"
+        return f"{window_minutes // 1440}d"
     if window_minutes % 60 == 0:
-        return f"{window_minutes // 60}h limit"
-    return f"{window_minutes}m limit"
+        return f"{window_minutes // 60}h"
+    return f"{window_minutes}m"
 
 
 def format_reset_text(resets_at: Any, tzinfo) -> str:
@@ -428,7 +428,7 @@ def build_rows(payload: dict[str, Any], tzinfo) -> list[UsageRow]:
 
     rows = [
         UsageRow(
-            label=format_window_label(primary.get("window_minutes"), "5h limit"),
+            label=format_window_label(primary.get("window_minutes"), "5h"),
             left_percent=max(
                 0.0, min(100.0, 100.0 - parse_used_percent(primary.get("used_percent")))
             ),
@@ -440,7 +440,7 @@ def build_rows(payload: dict[str, Any], tzinfo) -> list[UsageRow]:
         rows.append(
             UsageRow(
                 label=format_window_label(
-                    secondary.get("window_minutes"), "weekly limit"
+                    secondary.get("window_minutes"), "7d"
                 ),
                 left_percent=max(
                     0.0,
@@ -532,7 +532,7 @@ def render_usage_image(
 
     for idx, row in enumerate(rows):
         row_top = rows_top + idx * (row_height + gap)
-        percent_text = f"{int(round(row.left_percent))}% left"
+        percent_text = f"{int(round(row.used_percent))}%"
 
         label_bbox = draw.textbbox((0, 0), row.label, font=label_font)
         percent_bbox = draw.textbbox((0, 0), percent_text, font=stat_font)
@@ -744,7 +744,7 @@ def main() -> int:
         print(f"Usage 来源: {source}")
 
         for row in rows:
-            print(f"  {row.label}: {int(round(row.left_percent))}% left, {row.resets_text}")
+            print(f"  {row.label}: {int(round(row.used_percent))}%, {row.resets_text}")
 
         if args.preview_only:
             return 0
