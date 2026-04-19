@@ -29,6 +29,7 @@ from bluetag.screens import ScreenProfile, get_screen_profile
 from bluetag.text import render_text
 from bluetag.transfer import send_bicolor_image
 from bluetag.usage_claude import (
+    build_claude_panel_rows,
     build_claude_refresh_rows,
     fetch_claude_usage,
     render_claude_2_13,
@@ -36,11 +37,18 @@ from bluetag.usage_claude import (
     render_claude_3_7,
 )
 from bluetag.usage_codex import (
+    build_codex_panel_rows,
     build_codex_refresh_rows,
     fetch_codex_usage,
     render_codex_2_13,
     render_codex_2_9,
     render_codex_3_7,
+)
+from bluetag.usage_layout_3_7 import (
+    PANEL_BAR_INNER_WIDTH,
+    PANEL_BAR_INNER_WIDTH_2_9,
+    render_usage_panel_2_9,
+    render_usage_panel_3_7,
 )
 
 DEFAULT_SCAN_TIMEOUT = 5.0
@@ -300,46 +308,106 @@ def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
         ]
 
     if screen == "2.9inch":
+        def fetch_overview(*, timeout: float) -> dict[str, dict]:
+            del timeout
+            return {
+                "claude": fetch_claude_usage(timeout=10.0),
+                "codex": fetch_codex_usage(timeout=30.0),
+            }
+
+        def refresh_overview_rows(payload: dict[str, dict]) -> list[tuple[str, float]]:
+            claude_payload = payload.get("claude", {})
+            codex_payload = payload.get("codex", {})
+            rows = [
+                (f"claude:{label}", left_percent)
+                for label, left_percent in build_claude_refresh_rows(
+                    claude_payload, include_sonnet=False
+                )
+            ]
+            rows.extend(
+                (f"codex:{label}", left_percent)
+                for label, left_percent in build_codex_refresh_rows(codex_payload)
+            )
+            return rows
+
+        def render_overview(
+            payload: dict[str, dict], tzinfo, *, font_path: str | None = None
+        ):
+            return render_usage_panel_2_9(
+                sections=[
+                    (
+                        "Claude",
+                        build_claude_panel_rows(
+                            payload.get("claude", {}),
+                            tzinfo,
+                            include_sonnet=False,
+                        ),
+                    ),
+                    ("OpenAI Codex", build_codex_panel_rows(payload.get("codex", {}), tzinfo)),
+                ],
+                tzinfo=tzinfo,
+                font_path=font_path,
+            )
+
         return [
             UsageLoopSource(
-                name="codex",
+                name="overview",
                 timeout=30.0,
-                fetch=fetch_codex_usage,
-                refresh_rows=build_codex_refresh_rows,
-                bar_inner_width=278,
-                render=render_codex_2_9,
-            ),
-            UsageLoopSource(
-                name="claude",
-                timeout=10.0,
-                fetch=fetch_claude_usage,
-                refresh_rows=lambda payload: build_claude_refresh_rows(
-                    payload, include_sonnet=False
-                ),
-                bar_inner_width=278,
-                render=render_claude_2_9,
-            ),
+                fetch=fetch_overview,
+                refresh_rows=refresh_overview_rows,
+                bar_inner_width=PANEL_BAR_INNER_WIDTH_2_9,
+                render=render_overview,
+            )
         ]
+
+    def fetch_overview(*, timeout: float) -> dict[str, dict]:
+        del timeout
+        return {
+            "claude": fetch_claude_usage(timeout=10.0),
+            "codex": fetch_codex_usage(timeout=30.0),
+        }
+
+    def refresh_overview_rows(payload: dict[str, dict]) -> list[tuple[str, float]]:
+        claude_payload = payload.get("claude", {})
+        codex_payload = payload.get("codex", {})
+        rows = [
+            (f"claude:{label}", left_percent)
+            for label, left_percent in build_claude_refresh_rows(
+                claude_payload, include_sonnet=False
+            )
+        ]
+        rows.extend(
+            (f"codex:{label}", left_percent)
+            for label, left_percent in build_codex_refresh_rows(codex_payload)
+        )
+        return rows
+
+    def render_overview(payload: dict[str, dict], tzinfo, *, font_path: str | None = None):
+        return render_usage_panel_3_7(
+            sections=[
+                (
+                    "Claude",
+                    build_claude_panel_rows(
+                        payload.get("claude", {}),
+                        tzinfo,
+                        include_sonnet=False,
+                    ),
+                ),
+                ("OpenAI Codex", build_codex_panel_rows(payload.get("codex", {}), tzinfo)),
+            ],
+            tzinfo=tzinfo,
+            font_path=font_path,
+        )
 
     return [
         UsageLoopSource(
-            name="codex",
+            name="overview",
             timeout=30.0,
-            fetch=fetch_codex_usage,
-            refresh_rows=build_codex_refresh_rows,
-            bar_inner_width=370,
-            render=render_codex_3_7,
-        ),
-        UsageLoopSource(
-            name="claude",
-            timeout=10.0,
-            fetch=fetch_claude_usage,
-            refresh_rows=lambda payload: build_claude_refresh_rows(
-                payload, include_sonnet=True
-            ),
-            bar_inner_width=368,
-            render=render_claude_3_7,
-        ),
+            fetch=fetch_overview,
+            refresh_rows=refresh_overview_rows,
+            bar_inner_width=PANEL_BAR_INNER_WIDTH,
+            render=render_overview,
+        )
     ]
 
 
@@ -829,8 +897,8 @@ def main():
     loop_p.add_argument(
         "--interval",
         type=int,
-        default=90,
-        help="刷新间隔 (秒，默认 90)",
+        default=300,
+        help="刷新间隔 (秒，默认 300)",
     )
     loop_p.add_argument(
         "--full-refresh-every",

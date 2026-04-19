@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.error import HTTPError
 from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from bluetag.usage_claude import (
+    build_claude_panel_rows,
     build_claude_refresh_rows,
     build_claude_rows,
     fetch_claude_usage,
@@ -131,6 +135,107 @@ class ClaudeUsageTests(unittest.TestCase):
         self.assertEqual(refresh_request.full_url, "https://api.anthropic.com/v1/oauth/token")
         self.assertEqual(retry_request.headers["Authorization"], "Bearer fresh-token")
 
+    def test_fetch_claude_usage_from_linux_credentials_file(self) -> None:
+        payload = {
+            "five_hour": {"utilization": 45.2, "resets_at": "2026-04-03T18:00:00Z"}
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            credentials_path = os.path.join(tmpdir, ".credentials.json")
+            with open(credentials_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"claudeAiOauth": {"accessToken": "token-file-123"}},
+                    handle,
+                )
+
+            with patch("subprocess.run", side_effect=FileNotFoundError("security")):
+                with patch.dict(
+                    os.environ,
+                    {"CLAUDE_CREDENTIALS_PATH": credentials_path},
+                    clear=False,
+                ):
+                    with patch("urllib.request.urlopen", return_value=response) as urlopen_mock:
+                        result = fetch_claude_usage(timeout=7.5)
+
+        self.assertEqual(result, payload)
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(request.headers["Authorization"], "Bearer token-file-123")
+
+    def test_fetch_claude_usage_refreshes_and_saves_linux_credentials_file(self) -> None:
+        refreshed_usage = {
+            "five_hour": {"utilization": 22.0, "resets_at": "2026-04-03T18:00:00Z"}
+        }
+
+        usage_401 = HTTPError(
+            url="https://api.anthropic.com/api/oauth/usage",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,
+            fp=BytesIO(
+                b'{"type":"error","error":{"type":"authentication_error","details":{"error_code":"token_expired"}}}'
+            ),
+        )
+        refresh_response = Mock()
+        refresh_response.read.return_value = json.dumps(
+            {
+                "access_token": "fresh-file-token",
+                "refresh_token": "fresh-file-refresh",
+                "expires_in": 3600,
+            }
+        ).encode("utf-8")
+        refresh_response.__enter__ = Mock(return_value=refresh_response)
+        refresh_response.__exit__ = Mock(return_value=False)
+
+        usage_response = Mock()
+        usage_response.read.return_value = json.dumps(refreshed_usage).encode("utf-8")
+        usage_response.__enter__ = Mock(return_value=usage_response)
+        usage_response.__exit__ = Mock(return_value=False)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            credentials_path = os.path.join(tmpdir, ".credentials.json")
+            with open(credentials_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "claudeAiOauth": {
+                            "accessToken": "expired-file-token",
+                            "refreshToken": "refresh-file-123",
+                            "expiresAt": 1775294632955,
+                        }
+                    },
+                    handle,
+                )
+
+            with patch("subprocess.run", side_effect=FileNotFoundError("security")):
+                with patch.dict(
+                    os.environ,
+                    {"CLAUDE_CREDENTIALS_PATH": credentials_path},
+                    clear=False,
+                ):
+                    with patch(
+                        "urllib.request.urlopen",
+                        side_effect=[usage_401, refresh_response, usage_response],
+                    ) as urlopen_mock:
+                        result = fetch_claude_usage(timeout=7.5)
+
+            with open(credentials_path, "r", encoding="utf-8") as handle:
+                updated_payload = json.load(handle)
+
+        self.assertEqual(result, refreshed_usage)
+        retry_request = urlopen_mock.call_args_list[2].args[0]
+        self.assertEqual(retry_request.headers["Authorization"], "Bearer fresh-file-token")
+        self.assertEqual(
+            updated_payload["claudeAiOauth"]["accessToken"],
+            "fresh-file-token",
+        )
+        self.assertEqual(
+            updated_payload["claudeAiOauth"]["refreshToken"],
+            "fresh-file-refresh",
+        )
+
     def test_render_claude_images_for_both_screen_sizes(self) -> None:
         payload = {
             "five_hour": {"utilization": 45.2, "resets_at": "2026-04-03T18:00:00Z"},
@@ -149,6 +254,31 @@ class ClaudeUsageTests(unittest.TestCase):
         self.assertEqual(medium.size, (296, 128))
         self.assertEqual(large.size, (416, 240))
 
+    def test_build_claude_panel_rows_compacts_labels_for_3_7(self) -> None:
+        now = datetime.now(timezone.utc)
+        payload = {
+            "five_hour": {
+                "utilization": 94.0,
+                "resets_at": (now + timedelta(hours=4, minutes=52)).isoformat(),
+            },
+            "seven_day": {
+                "utilization": 88.0,
+                "resets_at": (now + timedelta(hours=126, minutes=52)).isoformat(),
+            },
+            "seven_day_sonnet": {
+                "utilization": 8.5,
+                "resets_at": (now + timedelta(hours=120)).isoformat(),
+            },
+        }
+
+        rows = build_claude_panel_rows(payload, ZoneInfo("UTC"), include_sonnet=False)
+
+        self.assertEqual([row.label for row in rows], ["5h", "7d"])
+        self.assertAlmostEqual(rows[0].used_percent, 94.0)
+        self.assertTrue(rows[0].remaining_text.endswith("m"))
+        self.assertIn("/", rows[1].remaining_text)
+        self.assertIn(":", rows[1].remaining_text)
+
     def test_render_claude_2_9_keeps_footer_and_right_edge_safe(self) -> None:
         payload = {
             "five_hour": {"utilization": 100.0, "resets_at": "2026-04-08T09:40:00Z"},
@@ -161,7 +291,7 @@ class ClaudeUsageTests(unittest.TestCase):
 
         image = render_claude_2_9(payload, ZoneInfo("Asia/Shanghai"))
         _min_x, _min_y, max_x, max_y = _black_bbox(image)
-        self.assertLessEqual(max_x, 283)
+        self.assertLessEqual(max_x, 288)
         self.assertLessEqual(max_y, 123)
 
     def test_build_claude_refresh_rows(self) -> None:

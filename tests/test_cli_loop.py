@@ -4,10 +4,27 @@ import asyncio
 import unittest
 from zoneinfo import ZoneInfo
 
-from bluetag.cli import UsageLoopSource, _build_refresh_state, _run_loop_cycle
+from bluetag.cli import (
+    UsageLoopSource,
+    _build_loop_sources,
+    _build_refresh_state,
+    _run_loop_cycle,
+)
 
 
 class CliLoopTests(unittest.TestCase):
+    def test_build_loop_sources_3_7_uses_single_overview_panel(self) -> None:
+        sources = _build_loop_sources("3.7inch")
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].name, "overview")
+
+    def test_build_loop_sources_2_9_uses_single_overview_panel(self) -> None:
+        sources = _build_loop_sources("2.9inch")
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].name, "overview")
+
     def test_run_loop_cycle_alternates_sources(self) -> None:
         events: list[tuple[str, object]] = []
 

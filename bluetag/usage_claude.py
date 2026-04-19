@@ -6,8 +6,8 @@ import json
 import os
 import subprocess
 import urllib.error
-import urllib.request
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +15,12 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageDraw, ImageFont
+
+from bluetag.usage_layout_3_7 import (
+    PanelRow,
+    render_usage_panel_2_9,
+    render_usage_panel_3_7,
+)
 
 API_URL = "https://api.anthropic.com/api/oauth/usage"
 API_BETA = "oauth-2025-04-20"
@@ -57,6 +63,8 @@ class ClaudeOAuthCredentials:
     refresh_token: str | None
     expires_at_ms: int | None
     raw_payload: dict[str, Any]
+    storage_kind: str
+    storage_path: Path | None = None
 
 
 def resolve_timezone(name: str | None):
@@ -66,6 +74,64 @@ def resolve_timezone(name: str | None):
         return ZoneInfo(name)
     except ZoneInfoNotFoundError as exc:
         raise ClaudeUsageError(f"Unknown timezone: {name}") from exc
+
+
+def _default_credentials_paths() -> list[Path]:
+    env_path = os.environ.get("CLAUDE_CREDENTIALS_PATH", "").strip()
+    candidates: list[Path] = []
+    if env_path:
+        candidates.append(Path(env_path).expanduser())
+
+    candidates.append(Path.home() / ".claude" / ".credentials.json")
+
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg_config_home:
+        candidates.append(Path(xdg_config_home).expanduser() / "claude" / "credentials.json")
+    else:
+        candidates.append(Path.home() / ".config" / "claude" / "credentials.json")
+
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        resolved = path.expanduser()
+        if resolved in seen:
+            continue
+        deduped.append(resolved)
+        seen.add(resolved)
+    return deduped
+
+
+def _parse_credentials_payload(
+    payload: dict[str, Any],
+    *,
+    storage_kind: str,
+    storage_path: Path | None = None,
+) -> ClaudeOAuthCredentials:
+    claude_oauth = payload.get("claudeAiOauth")
+    if not isinstance(claude_oauth, dict):
+        raise ClaudeUsageError("Missing `claudeAiOauth` in Claude credentials.")
+
+    access_token = claude_oauth.get("accessToken")
+    if not isinstance(access_token, str) or not access_token.strip():
+        raise ClaudeUsageError("Missing `claudeAiOauth.accessToken` in Claude credentials.")
+    refresh_token = claude_oauth.get("refreshToken")
+    if not isinstance(refresh_token, str) or not refresh_token.strip():
+        refresh_token = None
+    else:
+        refresh_token = refresh_token.strip()
+
+    expires_at_ms = claude_oauth.get("expiresAt")
+    if not isinstance(expires_at_ms, int):
+        expires_at_ms = None
+
+    return ClaudeOAuthCredentials(
+        access_token=access_token.strip(),
+        refresh_token=refresh_token,
+        expires_at_ms=expires_at_ms,
+        raw_payload=payload,
+        storage_kind=storage_kind,
+        storage_path=storage_path,
+    )
 
 
 def _load_credentials_from_keychain() -> ClaudeOAuthCredentials:
@@ -97,29 +163,51 @@ def _load_credentials_from_keychain() -> ClaudeOAuthCredentials:
     except json.JSONDecodeError as exc:
         raise ClaudeUsageError(f"Invalid Claude credential JSON: {exc}") from exc
 
-    claude_oauth = payload.get("claudeAiOauth")
-    if not isinstance(claude_oauth, dict):
-        raise ClaudeUsageError("Missing `claudeAiOauth` in Claude credentials.")
+    return _parse_credentials_payload(payload, storage_kind="keychain")
 
-    access_token = claude_oauth.get("accessToken")
-    if not isinstance(access_token, str) or not access_token.strip():
-        raise ClaudeUsageError("Missing `claudeAiOauth.accessToken` in Claude credentials.")
-    refresh_token = claude_oauth.get("refreshToken")
-    if not isinstance(refresh_token, str) or not refresh_token.strip():
-        refresh_token = None
-    else:
-        refresh_token = refresh_token.strip()
 
-    expires_at_ms = claude_oauth.get("expiresAt")
-    if not isinstance(expires_at_ms, int):
-        expires_at_ms = None
+def _load_credentials_from_file(path: Path) -> ClaudeOAuthCredentials:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ClaudeUsageError(f"Failed to read Claude credentials file {path}: {exc}") from exc
 
-    return ClaudeOAuthCredentials(
-        access_token=access_token.strip(),
-        refresh_token=refresh_token,
-        expires_at_ms=expires_at_ms,
-        raw_payload=payload,
-    )
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ClaudeUsageError(f"Invalid Claude credential JSON in {path}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ClaudeUsageError(f"Expected a JSON object in Claude credentials file: {path}")
+
+    return _parse_credentials_payload(payload, storage_kind="file", storage_path=path)
+
+
+def _load_claude_credentials() -> ClaudeOAuthCredentials:
+    try:
+        return _load_credentials_from_keychain()
+    except ClaudeUsageError as keychain_error:
+        file_errors: list[str] = []
+        for path in _default_credentials_paths():
+            if not path.exists():
+                continue
+            try:
+                return _load_credentials_from_file(path)
+            except ClaudeUsageError as exc:
+                file_errors.append(str(exc))
+
+        details: list[str] = []
+        if str(keychain_error):
+            details.append(str(keychain_error))
+        details.extend(file_errors)
+        suffix = f" Details: {'; '.join(details)}" if details else ""
+        searched_paths = ", ".join(str(path) for path in _default_credentials_paths())
+        raise ClaudeUsageError(
+            "Claude credentials not found. "
+            "macOS: requires Keychain item `Claude Code-credentials`; "
+            f"Linux: expected a JSON file such as {searched_paths}."
+            + suffix
+        ) from keychain_error
 
 
 def _save_credentials_to_keychain(credentials: ClaudeOAuthCredentials) -> None:
@@ -147,6 +235,19 @@ def _save_credentials_to_keychain(credentials: ClaudeOAuthCredentials) -> None:
         raise ClaudeUsageError(
             "Refreshed Claude token but failed to save updated credentials" + suffix
         )
+
+
+def _save_credentials_to_file(credentials: ClaudeOAuthCredentials, path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(credentials.raw_payload, separators=(",", ":")),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise ClaudeUsageError(
+            f"Refreshed Claude token but failed to save updated credentials to {path}: {exc}"
+        ) from exc
 
 
 def _request_json(request: urllib.request.Request, timeout: float) -> dict[str, Any]:
@@ -246,13 +347,20 @@ def _refresh_access_token(
         refresh_token=refresh_token,
         expires_at_ms=expires_at_ms,
         raw_payload=updated_payload,
+        storage_kind=credentials.storage_kind,
+        storage_path=credentials.storage_path,
     )
-    _save_credentials_to_keychain(refreshed)
+    if credentials.storage_kind == "keychain":
+        _save_credentials_to_keychain(refreshed)
+    elif credentials.storage_kind == "file" and credentials.storage_path is not None:
+        _save_credentials_to_file(refreshed, credentials.storage_path)
+    else:
+        raise ClaudeUsageError("Claude credentials storage backend is unknown.")
     return refreshed
 
 
 def fetch_claude_usage(*, timeout: float = 10.0) -> dict[str, Any]:
-    credentials = _load_credentials_from_keychain()
+    credentials = _load_claude_credentials()
 
     def build_usage_request(access_token: str) -> urllib.request.Request:
         return urllib.request.Request(
@@ -316,6 +424,40 @@ def _format_reset_text(resets_at: Any, tzinfo) -> str:
     return f"resets {time_text} on {reset_dt:%Y-%m-%d}"
 
 
+def _format_remaining_text(resets_at: Any, tzinfo) -> str:
+    if not isinstance(resets_at, str) or not resets_at:
+        return "?m"
+
+    iso_value = resets_at.replace("Z", "+00:00")
+    try:
+        reset_dt = datetime.fromisoformat(iso_value).astimezone(tzinfo)
+    except ValueError:
+        return "?m"
+
+    delta_seconds = max(0, int((reset_dt - datetime.now(tzinfo)).total_seconds()))
+    total_minutes = delta_seconds // 60
+    hours, minutes = divmod(total_minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes} m"
+
+
+def _format_reset_point_text(resets_at: Any, tzinfo) -> str:
+    if not isinstance(resets_at, str) or not resets_at:
+        return "--:--"
+
+    iso_value = resets_at.replace("Z", "+00:00")
+    try:
+        reset_dt = datetime.fromisoformat(iso_value).astimezone(tzinfo)
+    except ValueError:
+        return "--:--"
+
+    now_dt = datetime.now(tzinfo)
+    if reset_dt.date() == now_dt.date():
+        return reset_dt.strftime("%H:%M")
+    return f"{reset_dt.month}/{reset_dt.day} {reset_dt:%H:%M}"
+
+
 def build_claude_rows(
     payload: dict[str, Any],
     tzinfo,
@@ -354,6 +496,49 @@ def build_claude_refresh_rows(
     return [
         (row.label, row.left_percent)
         for row in build_claude_rows(payload, timezone.utc, include_sonnet=include_sonnet)
+    ]
+
+
+def _compact_window_label(label: str) -> str:
+    normalized = label.strip().lower()
+    if normalized.startswith("5h"):
+        return "5h"
+    if normalized.startswith("7d"):
+        return "7d"
+    return label
+
+
+def build_claude_panel_rows(
+    payload: dict[str, Any],
+    tzinfo,
+    *,
+    include_sonnet: bool,
+) -> list[PanelRow]:
+    five_hour = payload.get("five_hour")
+    seven_day = payload.get("seven_day")
+    seven_day_sonnet = payload.get("seven_day_sonnet")
+    reset_map = {
+        "5h session": five_hour.get("resets_at") if isinstance(five_hour, dict) else None,
+        "7d all models": seven_day.get("resets_at") if isinstance(seven_day, dict) else None,
+        "sonnet": (
+            seven_day_sonnet.get("resets_at")
+            if isinstance(seven_day_sonnet, dict)
+            else None
+        ),
+    }
+    rows = build_claude_rows(payload, tzinfo, include_sonnet=include_sonnet)
+    return [
+        PanelRow(
+            label=_compact_window_label(row.label),
+            left_percent=row.left_percent,
+            used_percent=row.used_percent,
+            remaining_text=(
+                _format_remaining_text(reset_map.get(row.label), tzinfo)
+                if _compact_window_label(row.label) == "5h"
+                else _format_reset_point_text(reset_map.get(row.label), tzinfo)
+            ),
+        )
+        for row in rows
     ]
 
 
@@ -497,26 +682,15 @@ def render_claude_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = 
 
 
 def render_claude_2_9(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
-    return _render_claude_small(
-        payload,
-        tzinfo,
-        font_path,
-        width=WIDTH_2_9,
-        height=HEIGHT_2_9,
-        title_font_size=13,
-        label_font_size=13,
-        stat_font_size=13,
-        detail_font_size=12,
-        left_pad=12,
-        right_pad=12,
-        top_pad=5,
-        bottom_pad=14,
-        title_gap=3,
-        gap=4,
-        bar_height=11,
-        bar_gap=5,
-        detail_gap=14,
-        row_tops=[4, 50],
+    return render_usage_panel_2_9(
+        sections=[
+            (
+                "Claude",
+                build_claude_panel_rows(payload, tzinfo, include_sonnet=False),
+            )
+        ],
+        tzinfo=tzinfo,
+        font_path=font_path,
     )
 
 
@@ -547,96 +721,13 @@ def _draw_large_progress_bar(
 
 
 def render_claude_3_7(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
-    rows = build_claude_rows(payload, tzinfo, include_sonnet=True)
-    row_map = {row.label: row for row in rows}
-    rows = [
-        row_map.get(
-            "5h session",
-            UsageRow(
-                label="5h session",
-                left_percent=0.0,
-                used_percent=100.0,
-                resets_text="resets unknown",
-            ),
-        ),
-        row_map.get(
-            "7d all models",
-            UsageRow(
-                label="7d all models",
-                left_percent=0.0,
-                used_percent=100.0,
-                resets_text="resets unknown",
-            ),
-        ),
-        row_map.get(
-            "sonnet",
-            UsageRow(
-                label="sonnet",
-                left_percent=0.0,
-                used_percent=100.0,
-                resets_text="resets unknown",
-            ),
-        ),
-    ]
-    image = Image.new("RGB", (WIDTH_3_7, HEIGHT_3_7), "white")
-    draw = ImageDraw.Draw(image)
-
-    header_h = 42
-    draw.rectangle((0, 0, WIDTH_3_7, header_h), fill="black")
-
-    title_font = _load_font(21, font_path=font_path)
-    time_font = _load_font(14, font_path=font_path)
-    section_font = _load_font(15, font_path=font_path)
-    stat_font = _load_font(18, font_path=font_path)
-    detail_font = _load_font(11, font_path=font_path)
-
-    draw.text((14, 9), "CC USAGE", fill="white", font=title_font)
-    time_text = datetime.now(tzinfo).strftime("%H:%M")
-    time_bbox = draw.textbbox((0, 0), time_text, font=time_font)
-    time_w = time_bbox[2] - time_bbox[0]
-    draw.text((WIDTH_3_7 - 14 - time_w, 13), time_text, fill="white", font=time_font)
-
-    top = header_h + 8
-    segment_h = 54
-    gap = 6
-    outer_left = 14
-    outer_right = 14
-    labels = {
-        "5h session": "SESSION",
-        "7d all models": "ALL MODELS",
-        "sonnet": "SONNET",
-    }
-
-    for index, row in enumerate(rows[:3]):
-        y = top + index * (segment_h + gap)
-        draw.rounded_rectangle(
-            (outer_left, y, WIDTH_3_7 - outer_right, y + segment_h),
-            radius=9,
-            outline="black",
-            width=2,
-        )
-        header_label = labels.get(row.label, row.label.upper())
-        draw.text((24, y + 7), header_label, fill="black", font=section_font)
-
-        percent_text = f"{int(round(row.left_percent))}% left"
-        percent_bbox = draw.textbbox((0, 0), percent_text, font=stat_font)
-        percent_w = percent_bbox[2] - percent_bbox[0]
-        draw.text(
-            (WIDTH_3_7 - 24 - percent_w, y + 5),
-            percent_text,
-            fill="red" if row.used_percent >= 80.0 else "black",
-            font=stat_font,
-        )
-
-        _draw_large_progress_bar(
-            draw,
-            x=24,
-            y=y + 24,
-            width=WIDTH_3_7 - 48,
-            height=12,
-            left_percent=row.left_percent,
-            used_percent=row.used_percent,
-        )
-        draw.text((24, y + 36), row.resets_text, fill="black", font=detail_font)
-
-    return image
+    return render_usage_panel_3_7(
+        sections=[
+            (
+                "Claude",
+                build_claude_panel_rows(payload, tzinfo, include_sonnet=False),
+            )
+        ],
+        tzinfo=tzinfo,
+        font_path=font_path,
+    )

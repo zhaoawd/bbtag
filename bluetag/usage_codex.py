@@ -14,6 +14,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageDraw, ImageFont
 
+from bluetag.usage_layout_3_7 import (
+    PanelRow,
+    render_usage_panel_2_9,
+    render_usage_panel_3_7,
+)
+
 DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
 USAGE_PATH = "/wham/usage"
 WIDTH_2_13 = 250
@@ -338,6 +344,51 @@ def format_reset_text(resets_at: Any, tzinfo) -> str:
     return f"resets {time_text} on {reset_dt:%Y-%m-%d}"
 
 
+def _format_remaining_text(resets_at: Any, tzinfo) -> str:
+    if not isinstance(resets_at, str) or not resets_at:
+        return "?m"
+
+    iso_value = resets_at.replace("Z", "+00:00")
+    try:
+        reset_dt = datetime.fromisoformat(iso_value).astimezone(tzinfo)
+    except ValueError:
+        return "?m"
+
+    delta_seconds = max(0, int((reset_dt - datetime.now(tzinfo)).total_seconds()))
+    total_minutes = delta_seconds // 60
+    hours, minutes = divmod(total_minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes} m"
+
+
+def _format_reset_point_text(resets_at: Any, tzinfo) -> str:
+    if not isinstance(resets_at, str) or not resets_at:
+        return "--:--"
+
+    iso_value = resets_at.replace("Z", "+00:00")
+    try:
+        reset_dt = datetime.fromisoformat(iso_value).astimezone(tzinfo)
+    except ValueError:
+        return "--:--"
+
+    now_dt = datetime.now(tzinfo)
+    if reset_dt.date() == now_dt.date():
+        return reset_dt.strftime("%H:%M")
+    return f"{reset_dt.month}/{reset_dt.day} {reset_dt:%H:%M}"
+
+
+def _compact_window_label(label: str) -> str:
+    normalized = label.strip().lower()
+    if normalized.startswith("5h"):
+        return "5h"
+    if "week" in normalized:
+        return "wk"
+    if normalized.startswith("7d"):
+        return "7d"
+    return label
+
+
 def build_codex_rows(payload: dict[str, Any], tzinfo) -> list[UsageRow]:
     primary, secondary = extract_rate_limits(payload)
 
@@ -400,6 +451,39 @@ def build_codex_refresh_rows(payload: dict[str, Any]) -> list[tuple[str, float]]
         )
 
     return rows[:2]
+
+
+def build_codex_panel_rows(payload: dict[str, Any], tzinfo) -> list[PanelRow]:
+    primary, secondary = extract_rate_limits(payload)
+
+    row_specs: list[tuple[dict[str, Any], str]] = [
+        (primary, format_window_label(primary.get("window_minutes"), "5h limit"))
+    ]
+    if secondary:
+        row_specs.append(
+            (
+                secondary,
+                format_window_label(secondary.get("window_minutes"), "weekly limit"),
+            )
+        )
+
+    rows: list[PanelRow] = []
+    for window, label in row_specs[:2]:
+        used_percent = parse_used_percent(window.get("used_percent"))
+        compact_label = _compact_window_label(label)
+        rows.append(
+            PanelRow(
+                label=compact_label,
+                left_percent=max(0.0, min(100.0, 100.0 - used_percent)),
+                used_percent=used_percent,
+                remaining_text=(
+                    _format_remaining_text(window.get("resets_at"), tzinfo)
+                    if compact_label == "5h"
+                    else _format_reset_point_text(window.get("resets_at"), tzinfo)
+                ),
+            )
+        )
+    return rows
 
 
 def _load_font(size: int, *, font_path: str | None = None) -> ImageFont.FreeTypeFont:
@@ -626,32 +710,16 @@ def render_codex_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = N
 
 
 def render_codex_2_9(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
-    return _render_rows_small(
-        build_codex_rows(payload, tzinfo),
-        title_text="codex",
+    return render_usage_panel_2_9(
+        sections=[("OpenAI Codex", build_codex_panel_rows(payload, tzinfo))],
+        tzinfo=tzinfo,
         font_path=font_path,
-        width=WIDTH_2_9,
-        height=HEIGHT_2_9,
-        title_font_size=13,
-        label_font_size=13,
-        stat_font_size=13,
-        detail_font_size=12,
-        left_pad=12,
-        right_pad=12,
-        top_pad=5,
-        bottom_pad=14,
-        title_gap=3,
-        gap=4,
-        bar_height=11,
-        bar_gap=5,
-        detail_gap=14,
-        row_tops=[4, 50],
     )
 
 
 def render_codex_3_7(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
-    return _render_rows_large(
-        build_codex_rows(payload, tzinfo),
-        title_text="codex",
+    return render_usage_panel_3_7(
+        sections=[("OpenAI Codex", build_codex_panel_rows(payload, tzinfo))],
+        tzinfo=tzinfo,
         font_path=font_path,
     )

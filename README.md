@@ -126,7 +126,7 @@ uv run bluetag decode capture.log -o decoded.png
 | `scan` | 扫描附近设备，可按屏幕类型过滤 |
 | `push` | 推送图片到电子墨水屏 |
 | `text` | 渲染文本并推送到电子墨水屏 |
-| `loop` | 交替刷新 Codex / Claude Code usage 面板 |
+| `loop` | 循环刷新 usage 面板 |
 | `decode` | 从抓包日志解码图片，便于协议调试 |
 
 ### scan 子命令参数
@@ -173,18 +173,18 @@ uv run bluetag decode capture.log -o decoded.png
 | 参数 | 说明 |
 |------|------|
 | `--screen` | 屏幕尺寸: `3.7inch` / `2.13inch` / `2.9inch` |
-| `--interval` | 刷新间隔秒数，默认 `90` |
+| `--interval` | 刷新间隔秒数，默认 `300` |
 | `--device, -d` | 设备名 |
 | `--address, -a` | 设备 BLE 地址 |
 | `--full-refresh-every` | 每 N 次局部刷新后强制全刷一次，默认 `5`，`0` 表示禁用 |
 | `--timezone` | 时区，例如 `Asia/Shanghai` |
 | `--font` | 自定义字体路径 |
 
-`loop` 会先定位目标设备，然后在 Codex usage 和 Claude Code usage 两张面板之间交替刷新。单次抓取或单次推送失败只会跳过本轮，不会中断整个循环；`Ctrl+C` 可优雅退出。
+`loop` 会先定位目标设备。`2.13inch` 会在 Codex usage 和 Claude Code usage 两张面板之间交替刷新；`2.9inch` / `3.7inch` 会把 Claude + OpenAI Codex 合并成一张总览面板。单次抓取或单次推送失败只会跳过本轮，不会中断整个循环；`Ctrl+C` 可优雅退出。
 
 为降低电子墨水屏闪烁，`loop` 会在推送前比较 usage 变化；只有剩余百分比变化至少 `2%`，或进度条宽度变化至少 `3px` 时，才会触发整屏刷新。
 
-Claude Code usage 会优先使用 Keychain 中的 `accessToken` 请求；如果返回 `token_expired`，会自动使用 `refreshToken` 换取新 token 后重试一次。
+Claude Code usage 会优先尝试读取 macOS Keychain 中的 `Claude Code-credentials`；在 Linux 上会回退读取 `~/.claude/.credentials.json`（也支持 `CLAUDE_CREDENTIALS_PATH` 覆盖）。如果返回 `token_expired`，会自动使用 `refreshToken` 换取新 token 后重试一次，并写回原凭证存储位置。
 
 `2.9inch` 当前的 BLE 协议参数是参照 `2.13inch` 设置的，已经补了渲染与 loop 支持，但 `device_prefix`、`encoding`、`settle_ms` 等仍建议按实机表现继续校正。
 
