@@ -18,6 +18,7 @@ from bluetag.usage_layout_3_7 import (
     PanelRow,
     render_usage_panel_2_9,
     render_usage_panel_3_7,
+    usage_color_for_percent,
 )
 
 DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
@@ -506,7 +507,7 @@ def _new_crisp_canvas(
     width: int,
     height: int,
 ) -> tuple[Image.Image, ImageDraw.ImageDraw]:
-    image = Image.new("1", (width, height), 1)
+    image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
     draw.fontmode = "1"
     return image, draw
@@ -547,11 +548,12 @@ def _draw_tracked_text(
     *,
     font: ImageFont.FreeTypeFont,
     tracking: int,
+    fill: int | str = 0,
 ) -> None:
     x, y = position
     cursor_x = x
     for index, char in enumerate(text):
-        draw.text((cursor_x, y), text=char, fill=0, font=font)
+        draw.text((cursor_x, y), text=char, fill=fill, font=font)
         char_bbox = draw.textbbox((0, 0), char, font=font)
         cursor_x += char_bbox[2] - char_bbox[0]
         if index < len(text) - 1:
@@ -566,6 +568,7 @@ def _draw_progress_bar(
     width: int,
     height: int,
     percent: float,
+    fill: int | str = "black",
 ) -> None:
     draw.rectangle((x, y, x + width, y + height), outline="black", width=1)
     inner_x0 = x + 2
@@ -578,7 +581,7 @@ def _draw_progress_bar(
     if fill_width > 0:
         draw.rectangle(
             (inner_x0, inner_y0, inner_x0 + fill_width - 1, inner_y1),
-            fill="black",
+            fill=fill,
         )
 
 
@@ -638,6 +641,7 @@ def _render_rows_small(
             font=stat_font,
             tracking=1,
         )
+        usage_color = usage_color_for_percent(row.used_percent)
 
         draw.text((left_pad, row_top), row.label, fill=0, font=label_font)
         _draw_tracked_text(
@@ -646,6 +650,7 @@ def _render_rows_small(
             percent_text,
             font=stat_font,
             tracking=1,
+            fill=usage_color,
         )
 
         bar_y = row_top + label_h + bar_gap
@@ -656,6 +661,7 @@ def _render_rows_small(
             width=width - left_pad - right_pad - 1,
             height=bar_height,
             percent=row.used_percent,
+            fill=usage_color,
         )
 
         detail_bbox = draw.textbbox((0, 0), row.resets_text, font=detail_font)
@@ -767,7 +773,7 @@ def render_codex_2_13(payload: dict[str, Any], tzinfo, font_path: str | None = N
 
 def render_codex_2_9(payload: dict[str, Any], tzinfo, font_path: str | None = None) -> Image.Image:
     return render_usage_panel_2_9(
-        sections=[("OpenAI Codex", build_codex_panel_rows(payload, tzinfo))],
+        sections=[("Codex", build_codex_panel_rows(payload, tzinfo))],
         tzinfo=tzinfo,
         font_path=font_path,
     )

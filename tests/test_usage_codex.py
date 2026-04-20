@@ -12,6 +12,10 @@ from bluetag.usage_codex import (
     render_codex_2_9,
     render_codex_3_7,
 )
+from bluetag.usage_layout_3_7 import (
+    _build_usage_panel_2_9_layout,
+    _format_timestamp_2_9,
+)
 
 
 def _black_bbox(image):
@@ -55,6 +59,80 @@ def _count_rgb_pixels(image, rgb):
 
 
 class CodexUsageTests(unittest.TestCase):
+    def test_format_timestamp_2_9_uses_compact_numeric_clock(self) -> None:
+        tzinfo = ZoneInfo("Asia/Shanghai")
+        now = datetime(2026, 4, 20, 11, 24, tzinfo=tzinfo)
+
+        self.assertEqual(_format_timestamp_2_9(now), "4/20 11:24")
+
+    def test_build_usage_panel_2_9_layout_compacts_header_and_preserves_right_columns(
+        self,
+    ) -> None:
+        layout = _build_usage_panel_2_9_layout(
+            title_text="Today Usage",
+            timestamp_text="4/20 11:24",
+            font_path=None,
+        )
+
+        self.assertLessEqual(layout.title_font_size, 11)
+        self.assertGreaterEqual(layout.body_font_size, 10)
+        self.assertGreaterEqual(layout.timestamp_x - layout.title_right, 12)
+        self.assertGreaterEqual(layout.percent_right - layout.bar_right, 18)
+        self.assertGreaterEqual(layout.time_right - layout.percent_right, 62)
+        self.assertGreaterEqual(layout.time_right - layout.percent_right, 58)
+        self.assertEqual(layout.section_tops, (27, 79))
+        self.assertEqual(layout.section_title_gap, 13)
+        self.assertGreaterEqual(layout.section_tops[1] - layout.section_tops[0], 50)
+
+    def test_render_codex_2_9_keeps_gap_between_number_and_percent_sign(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 8.0,
+                    "limit_window_seconds": 18_000,
+                    "reset_at": 1_775_242_400,
+                },
+                "secondary_window": {
+                    "used_percent": 45.0,
+                    "limit_window_seconds": 604_800,
+                    "reset_at": 1_775_520_000,
+                },
+            }
+        }
+
+        image = render_codex_2_9(payload, ZoneInfo("UTC")).convert("1")
+        blank_found = False
+        for x in range(204, 222):
+            has_black = any(image.getpixel((x, y)) == 0 for y in range(40, 49))
+            if not has_black:
+                blank_found = True
+                break
+        self.assertTrue(blank_found)
+
+    def test_render_codex_2_9_uses_short_section_title(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 8.0,
+                    "limit_window_seconds": 18_000,
+                    "reset_at": 1_775_242_400,
+                },
+                "secondary_window": {
+                    "used_percent": 45.0,
+                    "limit_window_seconds": 604_800,
+                    "reset_at": 1_775_520_000,
+                },
+            }
+        }
+
+        image = render_codex_2_9(payload, ZoneInfo("UTC")).convert("1")
+        lower_title_region = 0
+        for y in range(35, 40):
+            for x in range(60, 110):
+                if image.getpixel((x, y)) == 0:
+                    lower_title_region += 1
+        self.assertEqual(lower_title_region, 0)
+
     def test_build_codex_rows_from_rate_limit_payload(self) -> None:
         payload = {
             "rate_limit": {

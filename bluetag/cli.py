@@ -343,7 +343,7 @@ def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
                             include_sonnet=False,
                         ),
                     ),
-                    ("OpenAI Codex", build_codex_panel_rows(payload.get("codex", {}), tzinfo)),
+                    ("Codex", build_codex_panel_rows(payload.get("codex", {}), tzinfo)),
                 ],
                 tzinfo=tzinfo,
                 font_path=font_path,
