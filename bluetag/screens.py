@@ -27,6 +27,8 @@ class ScreenProfile:
     encoding: str = "row"
     initial_repeat_packets: int = 1
     supports_partial_diff: bool = True
+    red_offset_x: int = 0
+    red_offset_y: int = 0
 
     @property
     def size(self) -> tuple[int, int]:
@@ -86,6 +88,7 @@ SCREEN_PROFILES: dict[str, ScreenProfile] = {
         encoding="row",
         initial_repeat_packets=4,
         supports_partial_diff=False,
+        red_offset_y=-8,
     ),
 }
 

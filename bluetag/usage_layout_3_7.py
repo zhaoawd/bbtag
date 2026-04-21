@@ -385,7 +385,7 @@ def _draw_progress_row(
         used_percent=row.used_percent,
         font=value_font,
         number_tracking=1,
-        fill=usage_color,
+        fill="black",
     )
 
     detail_bbox = draw.textbbox((0, 0), row.remaining_text, font=detail_font)
@@ -584,7 +584,7 @@ def render_usage_panel_2_9(
                 used_percent=row.used_percent,
                 font=value_font,
                 number_tracking=0,
-                fill=usage_color,
+                fill="black",
             )
 
             detail_bbox = draw.textbbox((0, 0), row.remaining_text, font=detail_font)

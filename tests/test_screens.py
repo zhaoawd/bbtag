@@ -18,6 +18,15 @@ class ScreenProfileTests(unittest.TestCase):
         profile = get_screen_profile("2.9inch")
         self.assertFalse(profile.supports_partial_diff)
 
+    def test_2_9inch_uses_row_encoding(self) -> None:
+        profile = get_screen_profile("2.9inch")
+        self.assertEqual(profile.encoding, "row")
+
+    def test_2_9inch_applies_red_layer_vertical_compensation(self) -> None:
+        profile = get_screen_profile("2.9inch")
+        self.assertEqual(profile.red_offset_x, 0)
+        self.assertEqual(profile.red_offset_y, -8)
+
 
 if __name__ == "__main__":
     unittest.main()

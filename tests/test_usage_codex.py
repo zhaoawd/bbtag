@@ -18,6 +18,7 @@ from bluetag.usage_layout_3_7 import (
     _compute_fill_width,
     _format_timestamp_2_9,
     render_usage_panel_2_9,
+    render_usage_panel_3_7,
 )
 
 
@@ -56,6 +57,17 @@ def _count_rgb_pixels(image, rgb):
     converted = image.convert("RGB")
     for y in range(converted.height):
         for x in range(converted.width):
+            if converted.getpixel((x, y)) == rgb:
+                count += 1
+    return count
+
+
+def _count_rgb_pixels_in_box(image, rgb, box):
+    count = 0
+    converted = image.convert("RGB")
+    left, top, right, bottom = box
+    for y in range(top, bottom + 1):
+        for x in range(left, right + 1):
             if converted.getpixel((x, y)) == rgb:
                 count += 1
     return count
@@ -354,6 +366,40 @@ class CodexUsageTests(unittest.TestCase):
             render_codex_3_7(payload, ZoneInfo("UTC")),
         ):
             self.assertGreater(_count_rgb_pixels(image, (255, 0, 0)), 0)
+
+    def test_render_usage_panel_2_9_keeps_red_out_of_used_percent_text(self) -> None:
+        image = render_usage_panel_2_9(
+            sections=[
+                ("Claude", [PanelRow("5h", 15.0, 85.0, "19:00")]),
+            ],
+            tzinfo=ZoneInfo("UTC"),
+        )
+
+        self.assertGreater(
+            _count_rgb_pixels_in_box(image, (255, 0, 0), (35, 43, 175, 48)),
+            0,
+        )
+        self.assertEqual(
+            _count_rgb_pixels_in_box(image, (255, 0, 0), (190, 39, 220, 50)),
+            0,
+        )
+
+    def test_render_usage_panel_3_7_keeps_red_out_of_used_percent_text(self) -> None:
+        image = render_usage_panel_3_7(
+            sections=[
+                ("Claude", [PanelRow("5h", 15.0, 85.0, "19:00")]),
+            ],
+            tzinfo=ZoneInfo("UTC"),
+        )
+
+        self.assertGreater(
+            _count_rgb_pixels_in_box(image, (255, 0, 0), (48, 73, 225, 84)),
+            0,
+        )
+        self.assertEqual(
+            _count_rgb_pixels_in_box(image, (255, 0, 0), (287, 68, 311, 82)),
+            0,
+        )
 
     def test_render_codex_images_keep_low_usage_black_only(self) -> None:
         payload = {

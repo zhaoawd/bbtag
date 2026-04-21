@@ -187,18 +187,50 @@ def process_bicolor_image(
 
     if detect_red:
         rgb_pixels = list(canvas.getdata())
+        original_red_layer = [[0] * width for _ in range(height)]
         for row in range(height):
             for col in range(width):
                 idx = row * width + col
                 r, g, b = rgb_pixels[idx]
                 if r > 150 and g < 100 and b < 100:
-                    red_layer[row][col] = 1
-                    black_layer[row][col] = 0
+                    original_red_layer[row][col] = 1
+        red_layer = _shift_binary_layer(
+            original_red_layer,
+            dx=profile.red_offset_x,
+            dy=profile.red_offset_y,
+        )
+        for row in range(height):
+            for col in range(width):
+                if original_red_layer[row][col] or red_layer[row][col]:
+                    black_layer[row][col] = 1
 
     return black_layer, red_layer, bicolor_layers_to_image(black_layer, red_layer)
 
 
-def layer_to_bytes_rowwise(layer: list[list[int]]) -> bytes:
+def _shift_binary_layer(
+    layer: list[list[int]],
+    *,
+    dx: int = 0,
+    dy: int = 0,
+) -> list[list[int]]:
+    """Shift a binary layer. Positive dx moves right, positive dy moves down."""
+    height = len(layer)
+    width = len(layer[0]) if height else 0
+    shifted = [[0] * width for _ in range(height)]
+    for row in range(height):
+        target_row = row + dy
+        if not 0 <= target_row < height:
+            continue
+        for col in range(width):
+            if not layer[row][col]:
+                continue
+            target_col = col + dx
+            if 0 <= target_col < width:
+                shifted[target_row][target_col] = 1
+    return shifted
+
+
+def layer_to_bytes_rowwise(layer: list[list[int]], *, msb_left: bool = True) -> bytes:
     """Pack a layer row by row, 8 horizontal pixels per byte."""
     height = len(layer)
     width = len(layer[0]) if height else 0
@@ -210,7 +242,7 @@ def layer_to_bytes_rowwise(layer: list[list[int]]) -> bytes:
             start_col = byte_idx * 8
             byte_val = 0
             for bit_idx in range(8):
-                col = start_col + (7 - bit_idx)
+                col = start_col + (7 - bit_idx if msb_left else bit_idx)
                 if col < width and layer[row][col]:
                     byte_val |= 1 << bit_idx
             data.append(byte_val)
@@ -218,7 +250,9 @@ def layer_to_bytes_rowwise(layer: list[list[int]]) -> bytes:
     return bytes(data)
 
 
-def layer_to_bytes_columnwise(layer: list[list[int]]) -> bytes:
+def layer_to_bytes_columnwise(
+    layer: list[list[int]], *, lsb_top: bool = True
+) -> bytes:
     """Pack a layer column by column, 8 vertical pixels per byte."""
     height = len(layer)
     width = len(layer[0]) if height else 0
@@ -230,7 +264,7 @@ def layer_to_bytes_columnwise(layer: list[list[int]]) -> bytes:
             start_row = byte_idx * 8
             byte_val = 0
             for bit_idx in range(8):
-                row = start_row + bit_idx
+                row = start_row + (bit_idx if lsb_top else 7 - bit_idx)
                 if row < height and layer[row][col]:
                     byte_val |= 1 << bit_idx
             data.append(byte_val)
@@ -242,8 +276,12 @@ def layer_to_bytes(layer: list[list[int]], encoding: str = "row") -> bytes:
     """Convert image layer to transmission bytes."""
     if encoding == "row":
         return layer_to_bytes_rowwise(layer)
+    if encoding == "row_lsb":
+        return layer_to_bytes_rowwise(layer, msb_left=False)
     if encoding == "column":
         return layer_to_bytes_columnwise(layer)
+    if encoding == "column_msb":
+        return layer_to_bytes_columnwise(layer, lsb_top=False)
     raise ValueError(f"Unsupported encoding: {encoding}")
 
 
