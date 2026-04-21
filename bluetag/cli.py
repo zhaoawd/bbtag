@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image
 
+from bluetag import __version__
 from bluetag.ble import BleDependencyError
 from bluetag.image import (
     indices_to_image,
@@ -817,6 +818,11 @@ def main():
     parser = argparse.ArgumentParser(
         prog="bluetag",
         description="BluETag — 蓝签电子墨水标签 BLE 图像推送工具",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     sub = parser.add_subparsers(dest="command")
 

@@ -11,6 +11,19 @@ from bluetag import cli
 
 
 class CliScanTests(unittest.TestCase):
+    def test_main_prints_version(self) -> None:
+        stdout = io.StringIO()
+
+        with (
+            patch.object(sys, "argv", ["bluetag", "--version"]),
+            redirect_stdout(stdout),
+        ):
+            with self.assertRaises(SystemExit) as exc:
+                cli.main()
+
+        self.assertEqual(exc.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"bluetag {cli.__version__}")
+
     def test_main_parses_scan_retries_argument(self) -> None:
         captured = {}
 

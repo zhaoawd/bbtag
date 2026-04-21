@@ -13,8 +13,11 @@ from bluetag.usage_codex import (
     render_codex_3_7,
 )
 from bluetag.usage_layout_3_7 import (
+    PanelRow,
     _build_usage_panel_2_9_layout,
+    _compute_fill_width,
     _format_timestamp_2_9,
+    render_usage_panel_2_9,
 )
 
 
@@ -77,12 +80,25 @@ class CodexUsageTests(unittest.TestCase):
         self.assertLessEqual(layout.title_font_size, 11)
         self.assertGreaterEqual(layout.body_font_size, 10)
         self.assertGreaterEqual(layout.timestamp_x - layout.title_right, 12)
+        self.assertLessEqual(layout.timestamp_x, 226)
+        self.assertEqual(layout.title_y, 7)
+        self.assertEqual(layout.timestamp_y, 8)
+        self.assertEqual(layout.bar_x, 33)
         self.assertGreaterEqual(layout.percent_right - layout.bar_right, 18)
-        self.assertGreaterEqual(layout.time_right - layout.percent_right, 62)
+        self.assertGreaterEqual(layout.time_right - layout.percent_right, 64)
+        self.assertLessEqual(layout.time_right - layout.percent_right, 65)
         self.assertGreaterEqual(layout.time_right - layout.percent_right, 58)
-        self.assertEqual(layout.section_tops, (27, 79))
+        self.assertGreaterEqual(layout.used_header_right, layout.percent_right + 4)
+        self.assertLessEqual(layout.reset_header_right, layout.time_right - 7)
+        self.assertEqual(layout.section_tops, (27, 76))
         self.assertEqual(layout.section_title_gap, 13)
-        self.assertGreaterEqual(layout.section_tops[1] - layout.section_tops[0], 50)
+        self.assertGreaterEqual(layout.section_tops[1] - layout.section_tops[0], 47)
+
+    def test_compute_fill_width_keeps_tiny_percentages_visible_but_compact(self) -> None:
+        self.assertEqual(_compute_fill_width(144, 0.0), 0)
+        self.assertEqual(_compute_fill_width(144, 1.0), 1)
+        self.assertEqual(_compute_fill_width(144, 3.0), 1)
+        self.assertGreaterEqual(_compute_fill_width(144, 4.0), 5)
 
     def test_render_codex_2_9_keeps_gap_between_number_and_percent_sign(self) -> None:
         payload = {
@@ -132,6 +148,95 @@ class CodexUsageTests(unittest.TestCase):
                 if image.getpixel((x, y)) == 0:
                     lower_title_region += 1
         self.assertEqual(lower_title_region, 0)
+
+    def test_render_codex_2_9_keeps_reset_text_left_edge_clean(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 2.0,
+                    "limit_window_seconds": 18_000,
+                    "reset_at": 1_775_242_400,
+                },
+                "secondary_window": {
+                    "used_percent": 25.0,
+                    "limit_window_seconds": 604_800,
+                    "reset_at": 1_775_520_000,
+                },
+            }
+        }
+
+        image = render_codex_2_9(payload, ZoneInfo("Asia/Shanghai")).convert("1")
+        for y0, y1 in ((43, 49), (58, 64)):
+            stray_pixels = sum(
+                1
+                for y in range(y0, y1)
+                for x in range(232, 238)
+                if image.getpixel((x, y)) == 0
+            )
+            self.assertEqual(stray_pixels, 0)
+
+    def test_render_usage_panel_2_9_softens_divider_and_tightens_left_column(self) -> None:
+        image = render_usage_panel_2_9(
+            sections=[
+                (
+                    "Claude",
+                    [
+                        PanelRow("5h", 100.0, 0.0, "--:--"),
+                        PanelRow("7d", 75.0, 25.0, "4/24 09:00"),
+                    ],
+                ),
+                (
+                    "Codex",
+                    [
+                        PanelRow("5h", 78.0, 22.0, "15:22"),
+                        PanelRow("7d", 97.0, 3.0, "4/28 10:22"),
+                    ],
+                ),
+            ],
+            tzinfo=ZoneInfo("UTC"),
+        ).convert("1")
+
+        divider_black = sum(
+            1 for x in range(8, 288) if image.getpixel((x, 70)) == 0
+        )
+        self.assertLessEqual(divider_black, 110)
+
+        leftmost = []
+        for y0, y1 in ((40, 49), (55, 64), (92, 101), (107, 116)):
+            for y in range(y0, y1):
+                xs = [x for x in range(33, 70) if image.getpixel((x, y)) == 0]
+                if xs:
+                    leftmost.append(min(xs))
+        self.assertEqual(min(leftmost), 33)
+
+        row1_label_top = min(
+            y
+            for y in range(39, 51)
+            for x in range(8, 32)
+            if image.getpixel((x, y)) == 0
+        )
+        row1_pct_top = min(
+            y
+            for y in range(39, 51)
+            for x in range(195, 224)
+            if image.getpixel((x, y)) == 0
+        )
+        row1_reset_top = min(
+            y
+            for y in range(39, 51)
+            for x in range(240, 286)
+            if image.getpixel((x, y)) == 0
+        )
+        self.assertLessEqual(abs(row1_label_top - row1_pct_top), 1)
+        self.assertLessEqual(abs(row1_label_top - row1_reset_top), 1)
+
+        section2_title_top = min(
+            y
+            for y in range(76, 89)
+            for x in range(8, 70)
+            if image.getpixel((x, y)) == 0
+        )
+        self.assertLessEqual(section2_title_top, 79)
 
     def test_build_codex_rows_from_rate_limit_payload(self) -> None:
         payload = {

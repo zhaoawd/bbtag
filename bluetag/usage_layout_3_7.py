@@ -72,6 +72,8 @@ class UsagePanel2_9Layout:
     bar_right: int
     percent_right: int
     time_right: int
+    used_header_right: int
+    reset_header_right: int
     row_gap: int
     section_title_gap: int
 
@@ -180,12 +182,14 @@ def _draw_dashed_divider(
     y: int,
     left: int,
     right: int,
+    dash_len: int = 6,
+    gap_len: int = 5,
 ) -> None:
     x = left
     while x < right:
-        dash_right = min(x + 6, right)
+        dash_right = min(x + dash_len, right)
         draw.line((x, y, dash_right, y), fill="black", width=1)
-        x += 11
+        x += dash_len + gap_len
 
 
 def _draw_dotted_background(
@@ -244,6 +248,15 @@ def _draw_percent_text(
     )
 
 
+def _compute_fill_width(inner_width: int, used_percent: float) -> int:
+    percent = max(0.0, min(100.0, used_percent))
+    if percent <= 0.0:
+        return 0
+    if percent < 4.0:
+        return 1
+    return max(1, round(inner_width * percent / 100.0))
+
+
 def _fit_2_9_title_font_size(
     draw: ImageDraw.ImageDraw,
     *,
@@ -254,7 +267,7 @@ def _fit_2_9_title_font_size(
     timestamp_right: int,
     min_gap: int,
 ) -> tuple[int, int, int]:
-    timestamp_font = _load_font(9, font_path=font_path)
+    timestamp_font = _load_mono_font(10, font_path=font_path)
     timestamp_bbox = draw.textbbox((0, 0), timestamp_text, font=timestamp_font)
     timestamp_w = timestamp_bbox[2] - timestamp_bbox[0]
     timestamp_x = timestamp_right - timestamp_w
@@ -283,8 +296,8 @@ def _build_usage_panel_2_9_layout(
     draw = ImageDraw.Draw(image)
 
     title_x = 8
-    timestamp_right = WIDTH_2_9 - 15
-    time_right = WIDTH_2_9 - 14
+    timestamp_right = WIDTH_2_9 - 21
+    time_right = WIDTH_2_9 - 12
     title_font_size, title_right, timestamp_x = _fit_2_9_title_font_size(
         draw,
         title_text=title_text,
@@ -294,24 +307,26 @@ def _build_usage_panel_2_9_layout(
         timestamp_right=timestamp_right,
         min_gap=14,
     )
-    bar_x = 36
+    bar_x = 33
     bar_width = 148
     return UsagePanel2_9Layout(
         title_font_size=title_font_size,
         body_font_size=10,
         title_x=title_x,
-        title_y=6,
+        title_y=7,
         title_right=title_right,
         timestamp_x=timestamp_x,
-        timestamp_y=7,
+        timestamp_y=8,
         divider_y=70,
-        section_tops=(27, 79),
+        section_tops=(27, 76),
         label_x=8,
         bar_x=bar_x,
         bar_width=bar_width,
         bar_right=bar_x + bar_width - 1,
         percent_right=219,
         time_right=time_right,
+        used_header_right=224,
+        reset_header_right=277,
         row_gap=15,
         section_title_gap=13,
     )
@@ -350,9 +365,7 @@ def _draw_progress_row(
         y1=inner_y1,
     )
 
-    fill_width = round(
-        PANEL_BAR_INNER_WIDTH * max(0.0, min(100.0, row.used_percent)) / 100.0
-    )
+    fill_width = _compute_fill_width(PANEL_BAR_INNER_WIDTH, row.used_percent)
     usage_color = usage_color_for_percent(row.used_percent)
     if fill_width > 0:
         draw.rectangle(
@@ -494,10 +507,10 @@ def render_usage_panel_2_9(
         font_path=font_path,
     )
 
-    title_font = _load_bold_font(layout.title_font_size, font_path=font_path)
-    time_font = _load_font(layout.body_font_size, font_path=font_path)
+    title_font = _load_font(layout.title_font_size, font_path=font_path)
+    time_font = _load_mono_font(layout.body_font_size, font_path=font_path)
     section_font = _load_bold_font(layout.body_font_size, font_path=font_path)
-    label_font = _load_font(layout.body_font_size, font_path=font_path)
+    label_font = _load_mono_font(layout.body_font_size, font_path=font_path)
     value_font = _load_mono_font(layout.body_font_size, font_path=font_path)
     detail_font = _load_font(layout.body_font_size, font_path=font_path)
     column_font = _load_font(layout.body_font_size, font_path=font_path)
@@ -518,8 +531,8 @@ def render_usage_panel_2_9(
 
     _draw_column_headers(
         draw,
-        used_right=layout.percent_right,
-        reset_right=layout.time_right,
+        used_right=layout.used_header_right,
+        reset_right=layout.reset_header_right,
         y=24,
         font=column_font,
     )
@@ -530,7 +543,7 @@ def render_usage_panel_2_9(
         draw.text((layout.label_x, section_top), section_title, fill="black", font=section_font)
         row_y = section_top + layout.section_title_gap
         for row in rows[:2]:
-            draw.text((layout.label_x, row_y), row.label, fill="black", font=label_font)
+            draw.text((layout.label_x, row_y - 1), row.label, fill="black", font=label_font)
 
             bar_y = row_y + 1
             bar_x1 = layout.bar_right
@@ -547,13 +560,11 @@ def render_usage_panel_2_9(
                 y0=inner_y0,
                 x1=inner_x1,
                 y1=inner_y1,
-                x_step=6,
-                y_step=5,
-                stagger=3,
+                x_step=8,
+                y_step=6,
+                stagger=4,
             )
-            fill_width = round(
-                (layout.bar_width - 4) * max(0.0, min(100.0, row.used_percent)) / 100.0
-            )
+            fill_width = _compute_fill_width(layout.bar_width - 4, row.used_percent)
             usage_color = usage_color_for_percent(row.used_percent)
             if fill_width > 0:
                 draw.rectangle(
@@ -578,8 +589,10 @@ def render_usage_panel_2_9(
 
             detail_bbox = draw.textbbox((0, 0), row.remaining_text, font=detail_font)
             detail_w = detail_bbox[2] - detail_bbox[0]
+            detail_y = row_y - 4 if row.remaining_text == "--:--" else row_y - 2
+            detail_pos = (layout.time_right - detail_w + 2, detail_y)
             draw.text(
-                (layout.time_right - detail_w, row_y),
+                detail_pos,
                 row.remaining_text,
                 fill="black",
                 font=detail_font,
@@ -592,6 +605,8 @@ def render_usage_panel_2_9(
                 y=layout.divider_y,
                 left=8,
                 right=WIDTH_2_9 - 8,
+                dash_len=4,
+                gap_len=10,
             )
 
     return image
