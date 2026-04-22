@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from bluetag.usage_codex import (
@@ -17,6 +18,8 @@ from bluetag.usage_layout_3_7 import (
     _build_usage_panel_2_9_layout,
     _compute_fill_width,
     _format_timestamp_2_9,
+    _load_usage_reset_font,
+    _load_usage_value_font,
     render_usage_panel_2_9,
     render_usage_panel_3_7,
 )
@@ -74,6 +77,28 @@ def _count_rgb_pixels_in_box(image, rgb, box):
 
 
 class CodexUsageTests(unittest.TestCase):
+    def test_usage_value_font_prefers_regular_font_over_mono(self) -> None:
+        with (
+            patch("bluetag.usage_layout_3_7._load_font", return_value="regular") as load_font,
+            patch("bluetag.usage_layout_3_7._load_mono_font", return_value="mono") as load_mono,
+        ):
+            result = _load_usage_value_font(14)
+
+        self.assertEqual(result, "regular")
+        load_font.assert_called_once_with(14, font_path=None)
+        load_mono.assert_not_called()
+
+    def test_usage_reset_font_prefers_regular_font_over_mono(self) -> None:
+        with (
+            patch("bluetag.usage_layout_3_7._load_font", return_value="regular") as load_font,
+            patch("bluetag.usage_layout_3_7._load_mono_font", return_value="mono") as load_mono,
+        ):
+            result = _load_usage_reset_font(12)
+
+        self.assertEqual(result, "regular")
+        load_font.assert_called_once_with(12, font_path=None)
+        load_mono.assert_not_called()
+
     def test_format_timestamp_2_9_uses_compact_numeric_clock(self) -> None:
         tzinfo = ZoneInfo("Asia/Shanghai")
         now = datetime(2026, 4, 20, 11, 24, tzinfo=tzinfo)

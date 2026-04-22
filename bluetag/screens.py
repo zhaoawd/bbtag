@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+PACKAGE_DIR = Path(__file__).resolve().parent
+
 
 @dataclass(frozen=True)
 class ScreenProfile:
@@ -36,7 +38,10 @@ class ScreenProfile:
 
     @property
     def cache_path(self) -> Path:
-        return Path(self.cache_file)
+        cache_path = Path(self.cache_file)
+        if cache_path.is_absolute():
+            return cache_path
+        return PACKAGE_DIR / cache_path
 
 
 SCREEN_PROFILES: dict[str, ScreenProfile] = {

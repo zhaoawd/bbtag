@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import unittest
+from contextlib import redirect_stdout
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from bluetag import cli
 from bluetag.cli import (
     UsageLoopSource,
     _build_loop_sources,
@@ -13,6 +17,81 @@ from bluetag.cli import (
 
 
 class CliLoopTests(unittest.TestCase):
+    def test_save_device_creates_parent_directory(self) -> None:
+        with self.subTest("creates missing parent directory"):
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                profile = cli.ScreenProfile(
+                    name="test",
+                    aliases=("test",),
+                    width=4,
+                    height=1,
+                    device_prefix="EDP-",
+                    cache_file=f"{tmpdir}/nested/.device.test",
+                    transport="layer",
+                    default_interval_ms=100,
+                )
+
+                cli._save_device(
+                    {"name": "EDP-TEST", "address": "AA:BB:CC:DD:EE:FF"},
+                    profile,
+                )
+
+                self.assertTrue(profile.cache_path.exists())
+                self.assertEqual(
+                    profile.cache_path.read_text(),
+                    "EDP-TEST\nAA:BB:CC:DD:EE:FF\n",
+                )
+
+    def test_run_loop_cycle_logs_current_time_prefix(self) -> None:
+        stdout = io.StringIO()
+
+        def fetch(*, timeout: float):
+            return {"name": "codex"}
+
+        def refresh_rows(payload):
+            return [("5h limit", 54.8)]
+
+        def render(payload, tzinfo, *, font_path=None):
+            return "image:codex"
+
+        async def push_image(source_name, image, prev_black=None, prev_red=None):
+            return True, None
+
+        async def sleep(_: float):
+            return None
+
+        source = UsageLoopSource(
+            name="codex",
+            timeout=9.0,
+            fetch=fetch,
+            refresh_rows=refresh_rows,
+            bar_inner_width=100,
+            render=render,
+        )
+
+        with (
+            patch("bluetag.cli._current_log_time", return_value="2026-04-22 08:00:00"),
+            redirect_stdout(stdout),
+        ):
+            asyncio.run(
+                _run_loop_cycle(
+                    sources=[source],
+                    screen_name="2.13inch",
+                    tzinfo=ZoneInfo("UTC"),
+                    font_path=None,
+                    push_image=push_image,
+                    interval_seconds=10,
+                    sleep=sleep,
+                )
+            )
+
+        self.assertIn(
+            "[2026-04-22 08:00:00] push codex refresh: first frame",
+            stdout.getvalue(),
+        )
+
     def test_build_loop_sources_3_7_uses_single_overview_panel(self) -> None:
         sources = _build_loop_sources("3.7inch")
 

@@ -119,6 +119,20 @@ def _load_mono_font(
     return _load_font(size, font_path=font_path)
 
 
+def _load_usage_value_font(
+    size: int, *, font_path: str | None = None
+) -> ImageFont.FreeTypeFont:
+    """Used-percent digits should avoid slashed-zero mono glyphs."""
+    return _load_font(size, font_path=font_path)
+
+
+def _load_usage_reset_font(
+    size: int, *, font_path: str | None = None
+) -> ImageFont.FreeTypeFont:
+    """Reset-time digits should stay legible on e-ink."""
+    return _load_font(size, font_path=font_path)
+
+
 def _draw_hardened_text(
     draw: ImageDraw.ImageDraw,
     position: tuple[int, int],
@@ -432,8 +446,8 @@ def render_usage_panel_3_7(
     time_font = _load_mono_font(14, font_path=font_path)
     section_font = _load_font(15, font_path=font_path)
     label_font = _load_font(14, font_path=font_path)
-    value_font = _load_mono_font(14, font_path=font_path)
-    detail_font = _load_mono_font(12, font_path=font_path)
+    value_font = _load_usage_value_font(14, font_path=font_path)
+    detail_font = _load_usage_reset_font(12, font_path=font_path)
     column_font = _load_font(13, font_path=font_path)
 
     _draw_hardened_text(draw, (12, 8), title_text, font=title_font)
@@ -511,8 +525,8 @@ def render_usage_panel_2_9(
     time_font = _load_mono_font(layout.body_font_size, font_path=font_path)
     section_font = _load_bold_font(layout.body_font_size, font_path=font_path)
     label_font = _load_mono_font(layout.body_font_size, font_path=font_path)
-    value_font = _load_mono_font(layout.body_font_size, font_path=font_path)
-    detail_font = _load_font(layout.body_font_size, font_path=font_path)
+    value_font = _load_usage_value_font(layout.body_font_size, font_path=font_path)
+    detail_font = _load_usage_reset_font(layout.body_font_size, font_path=font_path)
     column_font = _load_font(layout.body_font_size, font_path=font_path)
 
     draw.text(
@@ -580,7 +594,7 @@ def render_usage_panel_2_9(
             _draw_percent_text(
                 draw,
                 right=layout.percent_right,
-                y=row_y,
+                y=row_y - 1,
                 used_percent=row.used_percent,
                 font=value_font,
                 number_tracking=0,

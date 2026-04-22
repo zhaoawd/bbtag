@@ -42,7 +42,7 @@ uv run bluetag <subcommand>   # scan / push / text / loop / decode
 7. `usage_codex.py` / `usage_claude.py` — 获取 Codex/Claude Code usage 数据并渲染为墨水屏图像
 8. `cli.py` — argparse CLI，`loop` 子命令交替推送 usage 面板，含变化阈值检测避免无意义刷新
 
-设备名前缀区分屏幕类型：`EPD-` = 3.7 寸，`EDP-` = 2.13/2.9 寸。设备信息按屏幕缓存到 `.device.<screen>` 文件。
+设备名前缀区分屏幕类型：`EPD-` = 3.7 寸，`EDP-` = 2.13/2.9 寸。设备信息按屏幕缓存到已安装 `bluetag` 包目录下的 `.device.<screen>` 文件。
 
 ## Conventions
 

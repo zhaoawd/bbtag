@@ -102,6 +102,7 @@ def _resolve_profile(screen: str) -> ScreenProfile:
 
 def _save_device(device: dict, profile: ScreenProfile):
     """将设备信息写入对应屏幕的缓存文件。"""
+    profile.cache_path.parent.mkdir(parents=True, exist_ok=True)
     profile.cache_path.write_text(f"{device['name']}\n{device['address']}\n")
     print(f"  💾 已保存到 {profile.cache_path}")
 
@@ -283,6 +284,18 @@ def _resolve_timezone(name: str | None):
     except ZoneInfoNotFoundError as exc:
         print(f"❌ Unknown timezone: {name}", file=sys.stderr)
         raise SystemExit(2) from exc
+
+
+def _current_log_time() -> str:
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _loop_log(message: str) -> None:
+    print(f"[{_current_log_time()}] {message}")
+
+
+def _loop_error(message: str) -> None:
+    print(f"[{_current_log_time()}] {message}", file=sys.stderr)
 
 
 def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
@@ -493,14 +506,14 @@ async def _run_loop_cycle(
                 bar_inner_width=source.bar_inner_width,
             )
         except Exception as exc:
-            print(f"❌ {source.name} usage failed: {exc}", file=sys.stderr)
+            _loop_error(f"❌ {source.name} usage failed: {exc}")
             await sleep(interval_seconds)
             continue
 
         previous = states.get(source.name)
         reason = _refresh_reason(previous, current_state)
         if reason is None:
-            print(f"skip {source.name} refresh: no meaningful value change")
+            _loop_log(f"skip {source.name} refresh: no meaningful value change")
             await sleep(interval_seconds)
             continue
 
@@ -519,7 +532,7 @@ async def _run_loop_cycle(
                 source.name, image, prev_black, prev_red
             )
         except Exception as exc:
-            print(f"❌ {source.name} push failed: {exc}", file=sys.stderr)
+            _loop_error(f"❌ {source.name} push failed: {exc}")
             ok = False
             latest_layer_bytes = None
 
@@ -531,9 +544,9 @@ async def _run_loop_cycle(
                 partial_counts[source.name] = 0
             else:
                 partial_counts[source.name] = partial_counts.get(source.name, 0) + 1
-            print(f"push {source.name} refresh: {reason}")
+            _loop_log(f"push {source.name} refresh: {reason}")
         else:
-            print(f"❌ {source.name} push failed", file=sys.stderr)
+            _loop_error(f"❌ {source.name} push failed")
         await sleep(interval_seconds)
 
     return states
@@ -682,10 +695,10 @@ def cmd_loop(args):
     async def _loop():
         target = await _find_target(args, profile)
         if not target:
-            print("❌ 未找到设备")
+            _loop_error("❌ 未找到设备")
             return
 
-        print(
+        _loop_log(
             f"开始循环刷新 {profile.name} 设备 {target['name']} ({target['address']}), "
             f"间隔 {args.interval}s"
         )
@@ -738,7 +751,7 @@ def cmd_loop(args):
     try:
         asyncio.run(_loop())
     except KeyboardInterrupt:
-        print("\n已停止循环刷新")
+        _loop_log("已停止循环刷新")
 
 
 def cmd_decode(args):

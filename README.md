@@ -8,7 +8,7 @@ BT370R 蓝签电子墨水标签 BLE 图像推送库。
 - `2.13inch` (`250×122`, 黑/白/红, 设备名前缀 `EDP-`)
 - `2.9inch` (`296×128`, 黑/白/红, 设备名前缀暂按 `EDP-` 处理)
 
-CLI 会按 `--screen` 自动切换发送协议，并分别缓存到 `.device.3.7inch` / `.device.2.13inch` / `.device.2.9inch`。默认屏幕是 `3.7inch`。
+CLI 会按 `--screen` 自动切换发送协议，并分别缓存到已安装 `bluetag` 包目录下的 `.device.3.7inch` / `.device.2.13inch` / `.device.2.9inch`。默认屏幕是 `3.7inch`。
 
 ## 快速开始
 
