@@ -321,11 +321,26 @@ def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
         ]
 
     if screen == "2.9inch":
+        last_payloads: dict[str, dict] = {"claude": {}, "codex": {}}
+
         def fetch_overview(*, timeout: float) -> dict[str, dict]:
             del timeout
+            try:
+                last_payloads["claude"] = fetch_claude_usage(timeout=10.0)
+            except Exception as exc:
+                _loop_error(f"⚠️ claude fetch failed in overview: {exc}")
+            
+            try:
+                last_payloads["codex"] = fetch_codex_usage(timeout=30.0)
+            except Exception as exc:
+                _loop_error(f"⚠️ codex fetch failed in overview: {exc}")
+            
+            if not last_payloads["claude"] and not last_payloads["codex"]:
+                raise RuntimeError("Both claude and codex fetch failed")
+
             return {
-                "claude": fetch_claude_usage(timeout=10.0),
-                "codex": fetch_codex_usage(timeout=30.0),
+                "claude": last_payloads["claude"],
+                "codex": last_payloads["codex"],
             }
 
         def refresh_overview_rows(payload: dict[str, dict]) -> list[tuple[str, float]]:
@@ -373,11 +388,26 @@ def _build_loop_sources(screen: str) -> list[UsageLoopSource]:
             )
         ]
 
+    last_payloads_3_7: dict[str, dict] = {"claude": {}, "codex": {}}
+
     def fetch_overview(*, timeout: float) -> dict[str, dict]:
         del timeout
+        try:
+            last_payloads_3_7["claude"] = fetch_claude_usage(timeout=10.0)
+        except Exception as exc:
+            _loop_error(f"⚠️ claude fetch failed in overview: {exc}")
+        
+        try:
+            last_payloads_3_7["codex"] = fetch_codex_usage(timeout=30.0)
+        except Exception as exc:
+            _loop_error(f"⚠️ codex fetch failed in overview: {exc}")
+        
+        if not last_payloads_3_7["claude"] and not last_payloads_3_7["codex"]:
+            raise RuntimeError("Both claude and codex fetch failed")
+
         return {
-            "claude": fetch_claude_usage(timeout=10.0),
-            "codex": fetch_codex_usage(timeout=30.0),
+            "claude": last_payloads_3_7["claude"],
+            "codex": last_payloads_3_7["codex"],
         }
 
     def refresh_overview_rows(payload: dict[str, dict]) -> list[tuple[str, float]]:
