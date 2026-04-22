@@ -16,11 +16,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageDraw, ImageFont
 
-from bluetag.usage_layout_3_7 import (
-    PanelRow,
-    render_usage_panel_2_9,
-    render_usage_panel_3_7,
-)
+from bluetag.usage_layout_2_9 import render_usage_panel_2_9
+from bluetag.usage_layout_3_7 import render_usage_panel_3_7
+from bluetag.usage_layout_common import PanelRow
 
 API_URL = "https://api.anthropic.com/api/oauth/usage"
 API_BETA = "oauth-2025-04-20"

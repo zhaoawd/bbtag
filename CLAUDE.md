@@ -39,8 +39,9 @@ uv run bluetag <subcommand>   # scan / push / text / loop / decode
 4. `ble.py` — BLE 扫描/连接/发送 (基于 bleak)，提供 `push()` 和 `BleSession`
 5. `screens.py` — `ScreenProfile` dataclass 定义每种屏幕的尺寸、设备前缀、传输方式等参数
 6. `text.py` — 文字自动排版渲染，根据屏幕尺寸自适应字号
-7. `usage_codex.py` / `usage_claude.py` — 获取 Codex/Claude Code usage 数据并渲染为墨水屏图像
-8. `cli.py` — argparse CLI，`loop` 子命令交替推送 usage 面板，含变化阈值检测避免无意义刷新
+7. `usage_codex.py` / `usage_claude.py` — 获取 Codex/Claude Code usage 数据，组装面板行数据，并按屏幕尺寸分发到对应 renderer
+8. `usage_layout_common.py` / `usage_layout_2_9.py` / `usage_layout_3_7.py` — usage 面板共享数据结构，以及 2.9/3.7 各自独立的编排与渲染实现
+9. `cli.py` — argparse CLI，`loop` 子命令交替推送 usage 面板，含变化阈值检测避免无意义刷新
 
 设备名前缀区分屏幕类型：`EPD-` = 3.7 寸，`EDP-` = 2.13/2.9 寸。设备信息按屏幕缓存到已安装 `bluetag` 包目录下的 `.device.<screen>` 文件。
 

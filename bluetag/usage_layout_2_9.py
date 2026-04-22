@@ -1,7 +1,8 @@
-"""3.7-inch usage panel layout helpers."""
+"""2.9-inch usage panel layout helpers."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -9,11 +10,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 from bluetag.usage_layout_common import ALERT_USED_PERCENT, PanelRow
 
-WIDTH_3_7 = 416
-HEIGHT_3_7 = 240
-PANEL_BAR_WIDTH = 214
-PANEL_BAR_HEIGHT = 18
-PANEL_BAR_INNER_WIDTH = PANEL_BAR_WIDTH - 4
+WIDTH_2_9 = 296
+HEIGHT_2_9 = 128
+PANEL_BAR_WIDTH_2_9 = 156
+PANEL_BAR_HEIGHT_2_9 = 10
+PANEL_BAR_INNER_WIDTH_2_9 = PANEL_BAR_WIDTH_2_9 - 4
+
 _FONT_DIR = Path(__file__).parent / "fonts"
 _MONO_FONT_SEARCH = [
     "/System/Library/Fonts/Supplemental/Menlo.ttc",
@@ -39,6 +41,30 @@ _REGULAR_FONT_SEARCH = [
     str(_FONT_DIR / "AlibabaPuHuiTi-Bold.ttf"),
     *_MONO_FONT_SEARCH,
 ]
+
+
+@dataclass(frozen=True)
+class UsagePanel2_9Layout:
+    title_font_size: int
+    body_font_size: int
+    title_x: int
+    title_y: int
+    title_right: int
+    timestamp_x: int
+    timestamp_y: int
+    divider_y: int
+    section_tops: tuple[int, int]
+    label_x: int
+    bar_x: int
+    bar_width: int
+    bar_right: int
+    percent_right: int
+    time_right: int
+    used_header_right: int
+    reset_header_right: int
+    row_gap: int
+    section_title_gap: int
+
 
 def usage_color_for_percent(used_percent: float) -> str:
     return "red" if used_percent >= ALERT_USED_PERCENT else "black"
@@ -95,18 +121,6 @@ def _load_usage_reset_font(
     return _load_font(size, font_path=font_path)
 
 
-def _draw_hardened_text(
-    draw: ImageDraw.ImageDraw,
-    position: tuple[int, int],
-    text: str,
-    *,
-    font: ImageFont.FreeTypeFont,
-) -> None:
-    x, y = position
-    draw.text((x, y), text, fill="black", font=font)
-    draw.text((x + 1, y), text, fill="black", font=font)
-
-
 def _measure_tracked_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -142,10 +156,9 @@ def _draw_tracked_text(
             cursor_x += tracking
 
 
-def _format_timestamp(tzinfo) -> str:
-    now_dt = datetime.now(tzinfo)
-    hour_text = now_dt.strftime("%I").lstrip("0") or "0"
-    return f"{now_dt.strftime('%b')} {now_dt.day} {hour_text}:{now_dt:%M %p}"
+def _format_timestamp_2_9(now_dt: datetime) -> str:
+    return f"{now_dt.month}/{now_dt.day} {now_dt:%H:%M}"
+
 
 def _draw_dashed_divider(
     draw: ImageDraw.ImageDraw,
@@ -228,69 +241,78 @@ def _compute_fill_width(inner_width: int, used_percent: float) -> int:
     return max(1, round(inner_width * percent / 100.0))
 
 
-def _draw_progress_row(
+def _fit_2_9_title_font_size(
     draw: ImageDraw.ImageDraw,
     *,
-    row: PanelRow,
-    y: int,
-    label_font: ImageFont.FreeTypeFont,
-    value_font: ImageFont.FreeTypeFont,
-    detail_font: ImageFont.FreeTypeFont,
-) -> None:
-    left = 14
-    label_x = left
-    bar_x = 46
-    percent_right = 311
-    time_right = 403
-    bar_y = y + 1
-    bar_x1 = bar_x + PANEL_BAR_WIDTH - 1
-    bar_y1 = bar_y + PANEL_BAR_HEIGHT - 1
+    title_text: str,
+    timestamp_text: str,
+    font_path: str | None,
+    title_x: int,
+    timestamp_right: int,
+    min_gap: int,
+) -> tuple[int, int, int]:
+    timestamp_font = _load_mono_font(10, font_path=font_path)
+    timestamp_bbox = draw.textbbox((0, 0), timestamp_text, font=timestamp_font)
+    timestamp_w = timestamp_bbox[2] - timestamp_bbox[0]
+    timestamp_x = timestamp_right - timestamp_w
 
-    _draw_hardened_text(draw, (label_x, y), row.label, font=label_font)
-    draw.rectangle((bar_x, bar_y, bar_x1, bar_y1), outline="black", width=1)
+    for size in range(12, 9, -1):
+        title_font = _load_bold_font(size, font_path=font_path)
+        title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
+        title_w = title_bbox[2] - title_bbox[0]
+        title_right = title_x + title_w
+        if timestamp_x - title_right >= min_gap:
+            return size, title_right, timestamp_x
 
-    inner_x0 = bar_x + 2
-    inner_y0 = bar_y + 2
-    inner_x1 = bar_x1 - 2
-    inner_y1 = bar_y1 - 2
-    _draw_dotted_background(
+    fallback_font = _load_bold_font(10, font_path=font_path)
+    fallback_bbox = draw.textbbox((0, 0), title_text, font=fallback_font)
+    fallback_w = fallback_bbox[2] - fallback_bbox[0]
+    return 10, title_x + fallback_w, timestamp_x
+
+
+def _build_usage_panel_2_9_layout(
+    *,
+    title_text: str,
+    timestamp_text: str,
+    font_path: str | None,
+) -> UsagePanel2_9Layout:
+    image = Image.new("RGB", (WIDTH_2_9, HEIGHT_2_9), "white")
+    draw = ImageDraw.Draw(image)
+
+    title_x = 8
+    timestamp_right = WIDTH_2_9 - 21
+    time_right = WIDTH_2_9 - 12
+    title_font_size, title_right, timestamp_x = _fit_2_9_title_font_size(
         draw,
-        x0=inner_x0,
-        y0=inner_y0,
-        x1=inner_x1,
-        y1=inner_y1,
+        title_text=title_text,
+        timestamp_text=timestamp_text,
+        font_path=font_path,
+        title_x=title_x,
+        timestamp_right=timestamp_right,
+        min_gap=14,
     )
-
-    fill_width = _compute_fill_width(PANEL_BAR_INNER_WIDTH, row.used_percent)
-    usage_color = usage_color_for_percent(row.used_percent)
-    if fill_width > 0:
-        draw.rectangle(
-            (
-                inner_x0,
-                inner_y0,
-                inner_x0 + fill_width - 1,
-                inner_y1,
-            ),
-            fill=usage_color,
-        )
-
-    _draw_percent_text(
-        draw,
-        right=percent_right,
-        y=y,
-        used_percent=row.used_percent,
-        font=value_font,
-        number_tracking=1,
-        fill="black",
-    )
-
-    detail_bbox = draw.textbbox((0, 0), row.remaining_text, font=detail_font)
-    detail_w = detail_bbox[2] - detail_bbox[0]
-    draw.text(
-        (time_right - detail_w, y),
-        row.remaining_text,
-        fill="black",
-        font=detail_font,
+    bar_x = 33
+    bar_width = 148
+    return UsagePanel2_9Layout(
+        title_font_size=title_font_size,
+        body_font_size=11,
+        title_x=title_x,
+        title_y=7,
+        title_right=title_right,
+        timestamp_x=timestamp_x,
+        timestamp_y=8,
+        divider_y=70,
+        section_tops=(27, 73),
+        label_x=8,
+        bar_x=bar_x,
+        bar_width=bar_width,
+        bar_right=bar_x + bar_width - 1,
+        percent_right=219,
+        time_right=time_right,
+        used_header_right=224,
+        reset_header_right=277,
+        row_gap=15,
+        section_title_gap=13,
     )
 
 
@@ -313,73 +335,129 @@ def _draw_column_headers(
     draw.text((reset_right - reset_w, y), reset_text, fill="black", font=font)
 
 
-def render_usage_panel_3_7(
+def render_usage_panel_2_9(
     *,
     sections: list[tuple[str, list[PanelRow]]],
     tzinfo,
     font_path: str | None = None,
     title_text: str = "Token Usage",
 ) -> Image.Image:
-    image = Image.new("RGB", (WIDTH_3_7, HEIGHT_3_7), "white")
+    image = Image.new("RGB", (WIDTH_2_9, HEIGHT_2_9), "white")
     draw = ImageDraw.Draw(image)
     draw.fontmode = "1"
 
-    title_font = _load_bold_font(18, font_path=font_path)
-    time_font = _load_mono_font(14, font_path=font_path)
-    section_font = _load_font(15, font_path=font_path)
-    label_font = _load_font(14, font_path=font_path)
-    value_font = _load_usage_value_font(14, font_path=font_path)
-    detail_font = _load_usage_reset_font(12, font_path=font_path)
-    column_font = _load_font(13, font_path=font_path)
+    timestamp_text = _format_timestamp_2_9(datetime.now(tzinfo))
+    layout = _build_usage_panel_2_9_layout(
+        title_text=title_text,
+        timestamp_text=timestamp_text,
+        font_path=font_path,
+    )
 
-    _draw_hardened_text(draw, (12, 8), title_text, font=title_font)
-    timestamp_text = _format_timestamp(tzinfo)
-    timestamp_bbox = draw.textbbox((0, 0), timestamp_text, font=time_font)
-    timestamp_w = timestamp_bbox[2] - timestamp_bbox[0]
+    title_font = _load_font(layout.title_font_size, font_path=font_path)
+    time_font = _load_mono_font(layout.body_font_size, font_path=font_path)
+    section_font = _load_bold_font(layout.body_font_size, font_path=font_path)
+    label_font = _load_mono_font(layout.body_font_size, font_path=font_path)
+    value_font = _load_usage_value_font(layout.body_font_size, font_path=font_path)
+    detail_font = _load_usage_reset_font(layout.body_font_size - 1, font_path=font_path)
+    column_font = _load_font(layout.body_font_size, font_path=font_path)
+
     draw.text(
-        (WIDTH_3_7 - 16 - timestamp_w, 10),
+        (layout.title_x, layout.title_y),
+        title_text,
+        fill="black",
+        font=title_font,
+    )
+    draw.text(
+        (layout.timestamp_x, layout.timestamp_y),
         timestamp_text,
         fill="black",
         font=time_font,
     )
-    draw.line((12, 31, WIDTH_3_7 - 12, 31), fill="black", width=1)
-
-    if len(sections) <= 1:
-        section_tops = [50]
-        row_gap = 34
-    else:
-        section_tops = [42, 128]
-        row_gap = 28
+    draw.line((8, 21, WIDTH_2_9 - 8, 21), fill="black", width=1)
 
     _draw_column_headers(
         draw,
-        used_right=311,
-        reset_right=403,
-        y=40,
+        used_right=layout.used_header_right,
+        reset_right=layout.reset_header_right,
+        y=24,
         font=column_font,
     )
 
     for index, ((section_title, rows), section_top) in enumerate(
-        zip(sections[: len(section_tops)], section_tops)
+        zip(sections[: len(layout.section_tops)], layout.section_tops)
     ):
-        _draw_hardened_text(draw, (12, section_top), section_title, font=section_font)
-        row_y = section_top + 20
+        draw.text(
+            (layout.label_x, section_top),
+            section_title,
+            fill="black",
+            font=section_font,
+        )
+        row_y = section_top + layout.section_title_gap
         for row in rows[:2]:
-            _draw_progress_row(
+            draw.text((layout.label_x, row_y - 1), row.label, fill="black", font=label_font)
+
+            bar_y = row_y + 1
+            bar_x1 = layout.bar_right
+            bar_y1 = bar_y + PANEL_BAR_HEIGHT_2_9 - 1
+            draw.rectangle((layout.bar_x, bar_y, bar_x1, bar_y1), outline="black", width=1)
+
+            inner_x0 = layout.bar_x + 2
+            inner_y0 = bar_y + 2
+            inner_x1 = bar_x1 - 2
+            inner_y1 = bar_y1 - 2
+            _draw_dotted_background(
                 draw,
-                row=row,
-                y=row_y,
-                label_font=label_font,
-                value_font=value_font,
-                detail_font=detail_font,
+                x0=inner_x0,
+                y0=inner_y0,
+                x1=inner_x1,
+                y1=inner_y1,
+                x_step=8,
+                y_step=6,
+                stagger=4,
             )
-            row_y += row_gap
-        if index < min(len(sections), len(section_tops)) - 1:
+            fill_width = _compute_fill_width(layout.bar_width - 4, row.used_percent)
+            usage_color = usage_color_for_percent(row.used_percent)
+            if fill_width > 0:
+                draw.rectangle(
+                    (
+                        inner_x0,
+                        inner_y0,
+                        inner_x0 + fill_width - 1,
+                        inner_y1,
+                    ),
+                    fill=usage_color,
+                )
+
+            _draw_percent_text(
+                draw,
+                right=layout.percent_right,
+                y=row_y - 2,
+                used_percent=row.used_percent,
+                font=value_font,
+                number_tracking=0,
+                fill="black",
+            )
+
+            detail_bbox = draw.textbbox((0, 0), row.remaining_text, font=detail_font)
+            detail_w = detail_bbox[2] - detail_bbox[0]
+            detail_y = row_y - 4 if row.remaining_text == "--:--" else row_y - 2
+            detail_pos = (layout.time_right - detail_w + 3, detail_y)
+            draw.text(
+                detail_pos,
+                row.remaining_text,
+                fill="black",
+                font=detail_font,
+            )
+            row_y += layout.row_gap
+
+        if index < min(len(sections), len(layout.section_tops)) - 1:
             _draw_dashed_divider(
                 draw,
-                y=118,
-                left=12,
-                right=WIDTH_3_7 - 12,
+                y=layout.divider_y,
+                left=8,
+                right=WIDTH_2_9 - 8,
+                dash_len=4,
+                gap_len=10,
             )
 
     return image

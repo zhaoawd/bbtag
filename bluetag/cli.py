@@ -45,12 +45,11 @@ from bluetag.usage_codex import (
     render_codex_2_9,
     render_codex_3_7,
 )
-from bluetag.usage_layout_3_7 import (
-    PANEL_BAR_INNER_WIDTH,
+from bluetag.usage_layout_2_9 import (
     PANEL_BAR_INNER_WIDTH_2_9,
     render_usage_panel_2_9,
-    render_usage_panel_3_7,
 )
+from bluetag.usage_layout_3_7 import PANEL_BAR_INNER_WIDTH, render_usage_panel_3_7
 
 DEFAULT_SCAN_TIMEOUT = 5.0
 DEFAULT_SCAN_RETRIES = 3

@@ -14,12 +14,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageDraw, ImageFont
 
-from bluetag.usage_layout_3_7 import (
-    PanelRow,
-    render_usage_panel_2_9,
-    render_usage_panel_3_7,
-    usage_color_for_percent,
-)
+from bluetag.usage_layout_2_9 import render_usage_panel_2_9
+from bluetag.usage_layout_3_7 import render_usage_panel_3_7
+from bluetag.usage_layout_common import ALERT_USED_PERCENT, PanelRow
 
 DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
 USAGE_PATH = "/wham/usage"
@@ -65,6 +62,10 @@ class UsageRow:
     left_percent: float
     used_percent: float
     resets_text: str
+
+
+def _usage_color_for_percent(used_percent: float) -> str:
+    return "red" if used_percent >= ALERT_USED_PERCENT else "black"
 
 
 def codex_home_dir() -> Path:
@@ -641,7 +642,7 @@ def _render_rows_small(
             font=stat_font,
             tracking=1,
         )
-        usage_color = usage_color_for_percent(row.used_percent)
+        usage_color = _usage_color_for_percent(row.used_percent)
 
         draw.text((left_pad, row_top), row.label, fill=0, font=label_font)
         _draw_tracked_text(

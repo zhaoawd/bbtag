@@ -13,15 +13,19 @@ from bluetag.usage_codex import (
     render_codex_2_9,
     render_codex_3_7,
 )
-from bluetag.usage_layout_3_7 import (
-    PanelRow,
+from bluetag.usage_layout_2_9 import (
     _build_usage_panel_2_9_layout,
     _compute_fill_width,
     _format_timestamp_2_9,
     _load_usage_reset_font,
     _load_usage_value_font,
     render_usage_panel_2_9,
+)
+from bluetag.usage_layout_3_7 import (
     render_usage_panel_3_7,
+)
+from bluetag.usage_layout_common import (
+    PanelRow,
 )
 
 
@@ -77,10 +81,37 @@ def _count_rgb_pixels_in_box(image, rgb, box):
 
 
 class CodexUsageTests(unittest.TestCase):
+    def test_usage_layout_common_exports_panel_row_and_alert_threshold(self) -> None:
+        from bluetag.usage_layout_common import ALERT_USED_PERCENT, PanelRow
+
+        row = PanelRow("5h", 78.0, 22.0, "15:22")
+
+        self.assertEqual(row.label, "5h")
+        self.assertEqual(ALERT_USED_PERCENT, 80.0)
+
+    def test_usage_layout_common_only_hosts_shared_data_contract(self) -> None:
+        import bluetag.usage_layout_common as common
+
+        self.assertTrue(hasattr(common, "PanelRow"))
+        self.assertFalse(hasattr(common, "render_usage_panel_2_9"))
+        self.assertFalse(hasattr(common, "render_usage_panel_3_7"))
+
+    def test_render_codex_2_9_uses_split_2_9_layout_module(self) -> None:
+        self.assertEqual(
+            render_codex_2_9.__globals__["render_usage_panel_2_9"].__module__,
+            "bluetag.usage_layout_2_9",
+        )
+
+    def test_render_codex_3_7_uses_split_3_7_layout_module(self) -> None:
+        self.assertEqual(
+            render_codex_3_7.__globals__["render_usage_panel_3_7"].__module__,
+            "bluetag.usage_layout_3_7",
+        )
+
     def test_usage_value_font_prefers_regular_font_over_mono(self) -> None:
         with (
-            patch("bluetag.usage_layout_3_7._load_font", return_value="regular") as load_font,
-            patch("bluetag.usage_layout_3_7._load_mono_font", return_value="mono") as load_mono,
+            patch("bluetag.usage_layout_2_9._load_font", return_value="regular") as load_font,
+            patch("bluetag.usage_layout_2_9._load_mono_font", return_value="mono") as load_mono,
         ):
             result = _load_usage_value_font(14)
 
@@ -90,8 +121,8 @@ class CodexUsageTests(unittest.TestCase):
 
     def test_usage_reset_font_prefers_regular_font_over_mono(self) -> None:
         with (
-            patch("bluetag.usage_layout_3_7._load_font", return_value="regular") as load_font,
-            patch("bluetag.usage_layout_3_7._load_mono_font", return_value="mono") as load_mono,
+            patch("bluetag.usage_layout_2_9._load_font", return_value="regular") as load_font,
+            patch("bluetag.usage_layout_2_9._load_mono_font", return_value="mono") as load_mono,
         ):
             result = _load_usage_reset_font(12)
 
@@ -114,8 +145,9 @@ class CodexUsageTests(unittest.TestCase):
             font_path=None,
         )
 
-        self.assertLessEqual(layout.title_font_size, 11)
-        self.assertGreaterEqual(layout.body_font_size, 10)
+        self.assertLessEqual(layout.title_font_size, 12)
+        self.assertGreaterEqual(layout.title_font_size, 12)
+        self.assertGreaterEqual(layout.body_font_size, 11)
         self.assertGreaterEqual(layout.timestamp_x - layout.title_right, 12)
         self.assertLessEqual(layout.timestamp_x, 226)
         self.assertEqual(layout.title_y, 7)
@@ -127,9 +159,9 @@ class CodexUsageTests(unittest.TestCase):
         self.assertGreaterEqual(layout.time_right - layout.percent_right, 58)
         self.assertGreaterEqual(layout.used_header_right, layout.percent_right + 4)
         self.assertLessEqual(layout.reset_header_right, layout.time_right - 7)
-        self.assertEqual(layout.section_tops, (27, 76))
+        self.assertEqual(layout.section_tops, (27, 73))
         self.assertEqual(layout.section_title_gap, 13)
-        self.assertGreaterEqual(layout.section_tops[1] - layout.section_tops[0], 47)
+        self.assertGreaterEqual(layout.section_tops[1] - layout.section_tops[0], 46)
 
     def test_compute_fill_width_keeps_tiny_percentages_visible_but_compact(self) -> None:
         self.assertEqual(_compute_fill_width(144, 0.0), 0)
@@ -273,7 +305,7 @@ class CodexUsageTests(unittest.TestCase):
             for x in range(8, 70)
             if image.getpixel((x, y)) == 0
         )
-        self.assertLessEqual(section2_title_top, 79)
+        self.assertLessEqual(section2_title_top, 76)
 
     def test_build_codex_rows_from_rate_limit_payload(self) -> None:
         payload = {

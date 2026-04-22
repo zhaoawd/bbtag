@@ -186,7 +186,7 @@ uv run bluetag decode capture.log -o decoded.png
 
 Claude Code usage 会优先尝试读取 macOS Keychain 中的 `Claude Code-credentials`；在 Linux 上会回退读取 `~/.claude/.credentials.json`（也支持 `CLAUDE_CREDENTIALS_PATH` 覆盖）。如果返回 `token_expired`，会自动使用 `refreshToken` 换取新 token 后重试一次，并写回原凭证存储位置。
 
-`2.9inch` 当前的 BLE 协议参数是参照 `2.13inch` 设置的，已经补了渲染与 loop 支持，但 `device_prefix`、`encoding`、`settle_ms` 等仍建议按实机表现继续校正。
+`2.9inch` 当前的 BLE 协议参数是参照 `2.13inch` 设置的，已经补了独立的 usage 编排与渲染调优；`device_prefix`、`encoding`、`settle_ms` 等传输参数仍建议按实机表现继续校正。
 
 ### decode 子命令参数
 
@@ -243,8 +243,11 @@ bbtag/
 │   ├── screens.py        #   屏幕配置、设备名前缀、缓存文件规则
 │   ├── transfer.py       #   2.13 寸图层发送协议
 │   ├── server.py         #   REST API 服务 (FastAPI)
-│   ├── usage_codex.py    #   Codex usage 获取与渲染
-│   ├── usage_claude.py   #   Claude Code usage 获取与渲染
+│   ├── usage_codex.py    #   Codex usage 获取、转换与分尺寸渲染分发
+│   ├── usage_claude.py   #   Claude Code usage 获取、转换与分尺寸渲染分发
+│   ├── usage_layout_common.py # usage 面板共享数据结构
+│   ├── usage_layout_2_9.py    # 2.9 寸 usage 编排与渲染
+│   ├── usage_layout_3_7.py    # 3.7 寸 usage 编排与渲染
 │   └── cli.py            #   命令行工具
 ├── examples/                     # 示例脚本
 │   ├── push_image.py             #   推送图片示例

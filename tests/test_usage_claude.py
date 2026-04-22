@@ -34,6 +34,18 @@ def _black_bbox(image):
 
 
 class ClaudeUsageTests(unittest.TestCase):
+    def test_render_claude_2_9_uses_split_2_9_layout_module(self) -> None:
+        self.assertEqual(
+            render_claude_2_9.__globals__["render_usage_panel_2_9"].__module__,
+            "bluetag.usage_layout_2_9",
+        )
+
+    def test_render_claude_3_7_uses_split_3_7_layout_module(self) -> None:
+        self.assertEqual(
+            render_claude_3_7.__globals__["render_usage_panel_3_7"].__module__,
+            "bluetag.usage_layout_3_7",
+        )
+
     def test_build_rows_omits_sonnet_on_small_screen(self) -> None:
         payload = {
             "five_hour": {"utilization": 45.2, "resets_at": "2026-04-03T18:00:00Z"},
